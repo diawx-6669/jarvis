@@ -12,7 +12,7 @@ from ui.gui import JarvisGUI
 
 
 def voice_loop(gui: JarvisGUI):
-    speak("Джарвис на связи", rate=190)
+    speak("Джарвис на связи")
     gui.set_text("Джарвис на связи. Жду 'Hey Jarvis'...")
     listener = WakeWordListener(keyword="hey_jarvis")
 
@@ -24,9 +24,9 @@ def voice_loop(gui: JarvisGUI):
 
             gui.set_state("listening")
             gui.set_text("Да? Слушаю...")
-            speak("Да?", rate=200)
+            speak("Да?")
 
-            text = listen_command(language="ru-RU")
+            text = listen_command(language="ru")
 
             gui.set_state("thinking")
             gui.set_text(f"«{text}»" if text else "Не расслышал...")

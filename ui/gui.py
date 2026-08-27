@@ -12,6 +12,8 @@ import tkinter as tk
 import math
 import threading
 import queue
+import subprocess
+import os
 
 COLORS = {
     "idle": "#1b3a4b",
@@ -56,7 +58,30 @@ class JarvisGUI:
         )
         self.label.pack(pady=(4, 10))
 
+        # На macOS окно, запущенное из терминала через venv, часто рисуется
+        # ЗА терминалом и не получает фокус (процесс python не "активируется"
+        # как обычное приложение). Поднимаем его наверх принудительно.
+        self.root.lift()
+        self.root.focus_force()
+        self._force_to_front()
+        self.root.after(400, self._force_to_front)  # ещё раз чуть позже, когда окно точно отрисовано
+
         self._animate()
+
+    def _force_to_front(self):
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        try:
+            # Просим macOS сделать процесс python активным приложением
+            # (без этого -topmost иногда не поднимает окно перед терминалом)
+            script = (
+                'tell application "System Events" to set frontmost of '
+                f'(first process whose unix id is {os.getpid()}) to true'
+            )
+            subprocess.run(["osascript", "-e", script], check=False,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            pass  # не macOS - просто пропускаем
 
     # --- Публичные методы (можно вызывать из другого потока) ---
     def set_state(self, state: str):
