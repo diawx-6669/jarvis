@@ -1,52 +1,43 @@
 """
-Слушает микрофон постоянно и ждёт слово "Jarvis" (встроенное ключевое слово Porcupine).
-Как только услышал - возвращает управление вызывающему коду.
+Слушает микрофон постоянно и ждёт фразу "Hey Jarvis" через openWakeWord.
+Полностью бесплатно, работает локально, НЕ требует регистрации и ключей.
 """
-import struct
-import pvporcupine
+import numpy as np
 import pyaudio
-import os
-from dotenv import load_dotenv
+from openwakeword.model import Model
+import openwakeword
 
-load_dotenv()
-
-PICOVOICE_ACCESS_KEY = os.getenv("PICOVOICE_ACCESS_KEY")
+CHUNK = 1280  # openWakeWord ожидает блоки по 80мс при 16кГц
+RATE = 16000
 
 
 class WakeWordListener:
-    def __init__(self, keyword="jarvis"):
-        if not PICOVOICE_ACCESS_KEY:
-            raise RuntimeError(
-                "Нет PICOVOICE_ACCESS_KEY в config/.env. "
-                "Зарегистрируйся бесплатно на https://console.picovoice.ai "
-                "и вставь ключ в config/.env"
-            )
-        self.porcupine = pvporcupine.create(
-            access_key=PICOVOICE_ACCESS_KEY,
-            keywords=[keyword],
-        )
+    def __init__(self, keyword="hey_jarvis"):
+        # При первом запуске openWakeWord скачивает свои модели автоматически
+        openwakeword.utils.download_models()
+        self.model = Model(wakeword_models=[keyword])
         self.pa = pyaudio.PyAudio()
         self.stream = self.pa.open(
-            rate=self.porcupine.sample_rate,
+            rate=RATE,
             channels=1,
             format=pyaudio.paInt16,
             input=True,
-            frames_per_buffer=self.porcupine.frame_length,
+            frames_per_buffer=CHUNK,
         )
 
-    def wait_for_wake_word(self):
-        """Блокирует выполнение, пока не услышит 'Jarvis'."""
-        print("👂 Слушаю... скажи 'Jarvis'")
+    def wait_for_wake_word(self, threshold=0.5):
+        """Блокирует выполнение, пока не услышит 'Hey Jarvis'."""
+        print("👂 Слушаю... скажи 'Hey Jarvis'")
         while True:
-            pcm = self.stream.read(self.porcupine.frame_length, exception_on_overflow=False)
-            pcm = struct.unpack_from("h" * self.porcupine.frame_length, pcm)
-            result = self.porcupine.process(pcm)
-            if result >= 0:
-                print("✅ Услышал 'Jarvis'!")
-                return True
+            audio_bytes = self.stream.read(CHUNK, exception_on_overflow=False)
+            audio_data = np.frombuffer(audio_bytes, dtype=np.int16)
+            predictions = self.model.predict(audio_data)
+            for mdl_name, score in predictions.items():
+                if score > threshold:
+                    print(f"✅ Услышал '{mdl_name}' (score={score:.2f})!")
+                    return True
 
     def close(self):
         self.stream.stop_stream()
         self.stream.close()
         self.pa.terminate()
-        self.porcupine.delete()

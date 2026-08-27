@@ -10,7 +10,7 @@ from brain.intent_parser import handle_command
 
 def main():
     speak("Джарвис на связи", rate=190)
-    listener = WakeWordListener(keyword="jarvis")
+    listener = WakeWordListener(keyword="hey_jarvis")
 
     try:
         while True:

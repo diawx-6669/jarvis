@@ -22,21 +22,14 @@ echo "📦 Устанавливаю Python-зависимости..."
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Настройка .env
-if [ ! -f config/.env ]; then
-    cp config/.env.example config/.env
-    echo ""
-    echo "⚠️  ВАЖНО: нужен бесплатный ключ Picovoice для wake word 'Jarvis'"
-    echo "   1. Зарегистрируйся: https://console.picovoice.ai"
-    echo "   2. Скопируй Access Key"
-    echo "   3. Вставь его в файл config/.env вместо PASTE_YOUR_KEY_HERE"
-    echo ""
-fi
-
-echo "✅ Готово! Дальше:"
-echo "   1. Отредактируй config/.env (см. выше)"
-echo "   2. source venv/bin/activate"
-echo "   3. python main.py"
 echo ""
-echo "⚠️  При первом запуске macOS спросит разрешение на доступ к микрофону -"
-echo "   разреши в System Settings -> Privacy & Security -> Microphone"
+echo "✅ Готово! Дальше:"
+echo "   1. source venv/bin/activate"
+echo "   2. python main.py"
+echo ""
+echo "⚠️  При первом запуске:"
+echo "   - macOS спросит разрешение на доступ к микрофону - разреши в"
+echo "     System Settings -> Privacy & Security -> Microphone"
+echo "   - openWakeWord автоматически скачает свои модели (~10 сек, один раз)"
+echo ""
+echo "🗣️  Скажи 'Hey Jarvis' чтобы активировать ассистента."
