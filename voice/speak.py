@@ -6,7 +6,7 @@
 import subprocess
 
 
-def speak(text, voice="Milena", rate=190):
+def speak(text, voice="Yuri", rate=185):
     """
     text: что сказать
     voice: имя голоса macOS (Milena/Yuri - русские голоса, Samantha - английский)

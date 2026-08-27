@@ -13,6 +13,12 @@ fi
 echo "📦 Устанавливаю portaudio (нужно для микрофона)..."
 brew install portaudio
 
+# tkinter нужен для графического интерфейса (окошко с кругом)
+# Важно: версия должна соответствовать версии python3 в системе
+PY_MINOR=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+echo "📦 Устанавливаю python-tk@${PY_MINOR} (для окна интерфейса)..."
+brew install "python-tk@${PY_MINOR}" || brew install python-tk || true
+
 # Виртуальное окружение Python
 echo "🐍 Создаю виртуальное окружение..."
 python3 -m venv venv
