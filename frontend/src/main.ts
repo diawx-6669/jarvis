@@ -9,7 +9,8 @@ import { createOrb, type OrbState } from "./orb";
 import { createVoiceInput, createAudioPlayer } from "./voice";
 import { createSocket } from "./ws";
 import { openSettings, checkFirstTimeSetup } from "./settings";
-import { initLanguage, type Lang } from "./language";
+import { initLanguage, setStoredLang, detectLanguageSwitch, type Lang } from "./language";
+import { startClapDetector } from "./clap";
 import "./style.css";
 
 // ---------------------------------------------------------------------------
@@ -95,8 +96,23 @@ function transition(newState: State) {
 // Voice input
 // ---------------------------------------------------------------------------
 
+function switchLanguage(lang: Lang) {
+  currentLang = lang;
+  setStoredLang(lang);
+  voiceInput.setLang(lang);
+  socket.send({ type: "set_language", lang });
+  showError(lang === "ru" ? "Язык переключён на русский" : "Switched to English");
+}
+
 const voiceInput = createVoiceInput(
   (text: string) => {
+    // Language can be switched at any moment, from any state — check first.
+    const requestedLang = detectLanguageSwitch(text);
+    if (requestedLang && requestedLang !== currentLang) {
+      switchLanguage(requestedLang);
+      return;
+    }
+
     // Cancel any current JARVIS response before sending new input
     audioPlayer.stop();
     // User spoke — send transcript
@@ -153,6 +169,13 @@ socket.onMessage((msg) => {
   } else if (type === "text") {
     // Text fallback when TTS fails
     console.log("[JARVIS]", msg.text);
+  } else if (type === "lang_changed") {
+    const lang = msg.lang === "ru" ? "ru" : "en";
+    if (lang !== currentLang) {
+      currentLang = lang;
+      setStoredLang(lang);
+      voiceInput.setLang(lang);
+    }
   } else if (type === "task_spawned") {
     console.log("[task]", "spawned:", msg.task_id, msg.prompt);
   } else if (type === "task_complete") {
@@ -183,6 +206,29 @@ document.addEventListener("keydown", ensureAudioContext, { once: true });
 
 // Try to resume audio context on load
 ensureAudioContext();
+
+// ---------------------------------------------------------------------------
+// Clap to wake — clap twice, JARVIS boots up and plays the wake sound
+// ---------------------------------------------------------------------------
+
+const wakeSound = new Audio("/wake.mp3");
+wakeSound.volume = 0.9;
+
+startClapDetector(() => {
+  ensureAudioContext();
+  wakeSound.currentTime = 0;
+  wakeSound.play().catch(() => {
+    // Autoplay can still be blocked before any user interaction; ignore.
+  });
+
+  if (isMuted) {
+    isMuted = false;
+    btnMute.classList.remove("muted");
+  }
+  voiceInput.resume();
+  transition("listening");
+  statusEl.textContent = "listening...";
+});
 
 // ---------------------------------------------------------------------------
 // UI Controls

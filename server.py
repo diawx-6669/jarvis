@@ -41,6 +41,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from actions import execute_action, monitor_build, open_terminal, open_browser, open_claude_in_project, _generate_project_name, prompt_existing_terminal, applescript_escape, open_app
+from music_access import play_song, pause_music, next_track, stop_music
+from actions import deploy_to_vercel, git_commit_project
 from work_mode import WorkSession, is_casual_question
 from screen import get_active_windows, take_screenshot, describe_screen, format_windows_for_context
 from calendar_access import get_todays_events, get_upcoming_events, get_next_event, format_events_for_context, format_schedule_summary, refresh_cache as refresh_calendar_cache
@@ -178,6 +180,12 @@ When you decide the user needs something DONE (not just discussed), include an a
 - [ACTION:OPEN_APP] app name — when user wants to open/launch a macOS application that is NOT the browser (e.g. Spotify, Telegram, WhatsApp, Discord, Notes, Music, Finder, Slack, VS Code).
   "open Spotify" → [ACTION:OPEN_APP] Spotify
   "open Telegram" → [ACTION:OPEN_APP] Telegram
+- [ACTION:MUSIC] song and/or artist name — when the user wants to play, pause, skip, or stop music via Apple Music.
+  "play Bohemian Rhapsody" → [ACTION:MUSIC] play ||| Bohemian Rhapsody
+  "play some music" → [ACTION:MUSIC] play |||
+  "pause the music" → [ACTION:MUSIC] pause |||
+  "skip this song" → [ACTION:MUSIC] next |||
+  "stop the music" → [ACTION:MUSIC] stop |||
   Use the app's exact display name as it appears in macOS.
 - [ACTION:ADD_TASK] priority ||| title ||| description ||| due_date — create a task. Priority: high/medium/low. Due date: YYYY-MM-DD or empty.
   "remind me to call the client tomorrow" → [ACTION:ADD_TASK] medium ||| Call the client ||| Follow up on proposal ||| 2026-03-20
@@ -794,7 +802,7 @@ def extract_action(response: str) -> tuple[str, dict | None]:
     Returns (clean_text_for_tts, action_dict_or_none).
     """
     match = _action_re.search(
-        r'\[ACTION:(BROWSE|ADD_TASK|ADD_NOTE|COMPLETE_TASK|REMEMBER|CREATE_NOTE|READ_NOTE|SCREEN|OPEN_APP)\]\s*(.*?)$',
+        r'\[ACTION:(BROWSE|ADD_TASK|ADD_NOTE|COMPLETE_TASK|REMEMBER|CREATE_NOTE|READ_NOTE|SCREEN|OPEN_APP|MUSIC)\]\s*(.*?)$',
         response, _action_re.DOTALL,
     )
     if match:
@@ -946,6 +954,37 @@ def _find_project_dir(project_name: str) -> str | None:
     return None
 
 
+async def _deploy_and_report(project_dir: str, project_name: str, ws, history: list[dict] = None, voice_state: dict = None):
+    """Deploy a project to Vercel in the background, then speak the result
+    and open the live URL — the 'захости' half of the build → host → tweak loop.
+    """
+    try:
+        result = await deploy_to_vercel(project_dir)
+        msg = result["confirmation"]
+        if result.get("url"):
+            msg = f"{project_name} is live, sir. Opening it now."
+            asyncio.create_task(_execute_browse(result["url"]))
+
+        if voice_state and time.time() - voice_state["last_user_time"] < 3:
+            log.info(f"Skipping deploy audio for {project_name} — user spoke recently")
+        else:
+            audio = await synthesize_speech(strip_markdown_for_tts(msg))
+            if ws:
+                try:
+                    await ws.send_json({"type": "status", "state": "speaking"})
+                    if audio:
+                        await ws.send_json({"type": "audio", "data": base64.b64encode(audio).decode(), "text": msg})
+                    else:
+                        await ws.send_json({"type": "text", "text": msg})
+                except Exception as e:
+                    log.error(f"Deploy audio send failed: {e}")
+
+        if history is not None:
+            history.append({"role": "assistant", "content": f"[Deploy result for {project_name}]: {msg}"})
+    except Exception as e:
+        log.error(f"Deploy execution failed: {e}")
+
+
 async def _execute_prompt_project(project_name: str, prompt: str, work_session: WorkSession, ws, dispatch_id: int = None, history: list[dict] = None, voice_state: dict = None):
     """Dispatch a prompt to Claude Code in a project directory.
 
@@ -1051,6 +1090,9 @@ async def _execute_prompt_project(project_name: str, prompt: str, work_session: 
             history.append({"role": "assistant", "content": f"[Dispatch result for {project_name}]: {msg}"})
 
         dispatch_registry.update_status(dispatch_id, "completed", response=full_response[:2000], summary=msg[:200])
+
+        # Auto-commit the work so "not happy with it → tweak → re-dispatch → commit" has a clean history
+        asyncio.create_task(git_commit_project(project_dir, f"JARVIS: {prompt[:72]}"))
         log.info(f"Project {project_name} dispatch complete ({len(full_response)} chars)")
 
     except Exception as e:
@@ -1580,6 +1622,31 @@ def detect_action_fast(text: str) -> dict | None:
                              "what's the cost", "whats the cost", "api cost", "token usage",
                              "how expensive", "what's my bill"]):
         return {"action": "check_usage"}
+
+    # Music transport controls (no song name — instant, no LLM roundtrip needed)
+    if any(p in t for p in ["pause the music", "pause music", "поставь на паузу", "пауза музык"]):
+        return {"action": "music_pause"}
+    if any(p in t for p in ["skip this song", "skip the song", "next song", "следующая песня", "переключи песню"]):
+        return {"action": "music_next"}
+    if any(p in t for p in ["stop the music", "stop music", "останови музыку"]):
+        return {"action": "music_stop"}
+    if t in ("play music", "play some music", "resume music", "resume the music",
+             "включи музыку", "поставь музыку", "продолжи музыку"):
+        return {"action": "music_play", "target": ""}
+
+    # Language switch — works from any state, any time (not just first launch)
+    if any(p in t for p in ["switch to russian", "speak russian", "talk in russian",
+                             "переключись на русский", "говори по-русски", "перейди на русский"]):
+        return {"action": "set_lang", "target": "ru"}
+    if any(p in t for p in ["switch to english", "speak english", "talk in english",
+                             "переключись на английский", "говори по-английски", "перейди на английский"]):
+        return {"action": "set_lang", "target": "en"}
+
+    # Deploy the most recently built project to Vercel
+    if any(p in t for p in ["host this", "host it", "deploy this", "deploy it", "put it online",
+                             "захости это", "захости", "задеплой", "задеплой это",
+                             "выложи в интернет", "выложи это"]):
+        return {"action": "deploy_project"}
 
     return None  # Everything else goes to the LLM for conversational routing
 
@@ -2218,6 +2285,29 @@ async def voice_handler(ws: WebSocket):
                             response_text = format_tasks_for_voice(tasks)
                         elif action["action"] == "check_usage":
                             response_text = get_usage_summary()
+                        elif action["action"] == "music_pause":
+                            asyncio.create_task(pause_music())
+                            response_text = "Pausing, sir."
+                        elif action["action"] == "music_next":
+                            asyncio.create_task(next_track())
+                            response_text = "Skipping, sir."
+                        elif action["action"] == "music_stop":
+                            asyncio.create_task(stop_music())
+                            response_text = "Stopping the music, sir."
+                        elif action["action"] == "music_play":
+                            asyncio.create_task(play_song(action.get("target", "")))
+                            response_text = "Playing, sir."
+                        elif action["action"] == "set_lang":
+                            session_lang = action["target"]
+                            await ws.send_json({"type": "lang_changed", "lang": session_lang})
+                            response_text = "Переключился на русский, сэр." if session_lang == "ru" else "Switched to English, sir."
+                        elif action["action"] == "deploy_project":
+                            recent = dispatch_registry.get_most_recent()
+                            if not recent or not recent.get("project_path"):
+                                response_text = "I don't have a recent project to deploy, sir."
+                            else:
+                                response_text = "Deploying to Vercel now, sir. One moment."
+                                asyncio.create_task(_deploy_and_report(recent["project_path"], recent["project_name"], ws, history=history, voice_state=voice_state))
                         else:
                             response_text = "Understood, sir."
                     else:
@@ -2246,6 +2336,20 @@ async def voice_handler(ws: WebSocket):
                                 elif embedded_action["action"] == "open_app":
                                     asyncio.create_task(open_app(embedded_action["target"]))
                                     log.info(f"Opening app: {embedded_action['target']}")
+                                elif embedded_action["action"] == "music":
+                                    target = embedded_action["target"]
+                                    verb, _, arg = target.partition("|||")
+                                    verb = verb.strip().lower()
+                                    arg = arg.strip()
+                                    if verb == "pause":
+                                        asyncio.create_task(pause_music())
+                                    elif verb == "next":
+                                        asyncio.create_task(next_track())
+                                    elif verb == "stop":
+                                        asyncio.create_task(stop_music())
+                                    else:
+                                        asyncio.create_task(play_song(arg))
+                                    log.info(f"Music action: {verb} {arg}")
                                 elif embedded_action["action"] == "add_task":
                                     target = embedded_action["target"]
                                     parts = target.split("|||")

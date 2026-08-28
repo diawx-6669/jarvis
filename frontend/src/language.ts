@@ -17,6 +17,31 @@ export function setStoredLang(lang: Lang) {
 }
 
 /**
+ * Detects an explicit "switch language" command from a raw transcript.
+ * Works in any state, not just the first-visit modal. Returns the
+ * requested language, or null if the text isn't a language-switch command.
+ */
+export function detectLanguageSwitch(text: string): Lang | null {
+  const t = text.toLowerCase().trim();
+  if (t.length > 60) return null; // long sentences are conversation, not commands
+
+  const toRu = [
+    "switch to russian", "speak russian", "talk in russian", "in russian please",
+    "переключись на русский", "говори по-русски", "переключи язык на русский",
+    "говори на русском", "перейди на русский",
+  ];
+  const toEn = [
+    "switch to english", "speak english", "talk in english", "in english please",
+    "переключись на английский", "говори по-английски", "переключи язык на английский",
+    "говори на английском", "перейди на английский",
+  ];
+
+  if (toRu.some((p) => t.includes(p))) return "ru";
+  if (toEn.some((p) => t.includes(p))) return "en";
+  return null;
+}
+
+/**
  * Resolve the language to use immediately (default "en"), and show a
  * one-time picker modal if the user hasn't chosen before. `onChange` fires
  * whenever the user picks a language (including from the initial modal).

@@ -26,6 +26,11 @@ JARVIS connects to your Apple Calendar, Mail, and Notes. It can browse the web, 
 - **Plans your day** -- combines calendar, tasks, and priorities into a plan
 - **Sees your screen** -- knows what apps are open for context-aware responses
 - **Audio-reactive orb** -- a Three.js particle visualization that pulses with JARVIS's voice
+- **Clap to wake** -- clap twice near your mic and JARVIS boots up with a signature sound (`frontend/public/wake.mp3`, swap in your own)
+- **Switch language anytime** -- say "switch to russian" / "переключись на английский" mid-conversation, no need to reload
+- **Plays music** -- "play Bohemian Rhapsody", "pause the music", "skip this song" (controls Apple Music via AppleScript)
+- **Autostart on login** -- one script installs a LaunchAgent so JARVIS is running the moment you open your laptop
+- **Build → preview → host → tweak loop** -- say "host this" after a build to deploy straight to Vercel, and every dispatch auto-commits to git so you can iterate freely
 
 ## Requirements
 
@@ -168,6 +173,31 @@ JARVIS remembers things you tell it using SQLite with FTS5 full-text search. Pre
 
 ### Calendar & Mail
 All macOS integrations use AppleScript -- no OAuth flows, no token management. Just native system access. Mail is intentionally read-only for safety.
+
+## New: Autostart, Music, Language, Clap-to-Wake, Deploy
+
+### Autostart on login
+```bash
+bash scripts/install_autostart.sh    # installs a LaunchAgent, runs at every login
+bash scripts/uninstall_autostart.sh  # removes it
+```
+This starts JARVIS the moment you log in / unlock your Mac. It's launchd's `RunAtLoad`, which is the closest macOS equivalent to "starts when I open my laptop" — it fires on login, not literally on lid-open if you're already logged in.
+
+### Clap to wake
+Clap twice within ~0.7s near your mic (works even while muted). JARVIS plays `frontend/public/wake.mp3` and starts listening. Replace that file with any sound you like — same filename, any length.
+
+### Switch language anytime
+Say "switch to russian" / "switch to english" (or "переключись на русский/английский") at any point — not just the first-run picker.
+
+### Music
+"play Bohemian Rhapsody", "play some music", "pause the music", "skip this song", "stop the music" — controls Apple Music (`Music.app`) via AppleScript. Needs the track in your library, or an active Apple Music subscription for the search fallback.
+
+### Build → preview → host → tweak
+1. "Build me a landing page" → Claude Code builds it, JARVIS auto-opens the local preview, and auto-commits the result to git.
+2. "Host this" → deploys the most recent project to Vercel and opens the live URL.
+3. Don't like it? Just ask for changes ("make the header bigger") — JARVIS re-dispatches Claude Code to the same project directory, and the new version auto-commits too.
+
+**Requires:** `npm install -g vercel` then `vercel login` once, done manually — JARVIS can't create your Vercel account or hosting credentials for you.
 
 ## Contributing
 

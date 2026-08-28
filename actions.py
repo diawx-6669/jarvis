@@ -437,3 +437,74 @@ def _generate_project_name(prompt: str) -> str:
             "web", "page", "site", "named"}
     meaningful = [w for w in words if w not in skip and len(w) > 2][:4]
     return "-".join(meaningful) if meaningful else "jarvis-project"
+
+
+# ---------------------------------------------------------------------------
+# Deploy & version control — used by the build → preview → host → tweak loop
+# ---------------------------------------------------------------------------
+
+async def _run(cmd: list[str], cwd: str, timeout: int = 180) -> tuple[bool, str]:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        return proc.returncode == 0, stdout.decode(errors="replace")
+    except asyncio.TimeoutError:
+        return False, "timed out"
+    except FileNotFoundError as e:
+        return False, str(e)
+
+
+async def deploy_to_vercel(project_dir: str) -> dict:
+    """Deploy a project directory to Vercel via the `vercel` CLI.
+
+    Requires the user to have already run `npm i -g vercel` and `vercel login`
+    once — JARVIS can't create the Vercel account or auth token for you.
+    """
+    if not project_dir or not os.path.isdir(project_dir):
+        return {"success": False, "confirmation": "I don't have a project to deploy, sir.", "url": None}
+
+    ok, output = await _run(["vercel", "--prod", "--yes"], cwd=project_dir, timeout=240)
+
+    if not ok:
+        log.error(f"vercel deploy failed: {output[-800:]}")
+        if "command not found" in output.lower() or "not recognized" in output.lower():
+            return {
+                "success": False,
+                "confirmation": "The Vercel CLI isn't installed, sir. Run 'npm install -g vercel' and 'vercel login' first.",
+                "url": None,
+            }
+        return {"success": False, "confirmation": "The deploy failed, sir. Worth checking the terminal output.", "url": None}
+
+    url_match = re.search(r"https://\S+\.vercel\.app\S*", output)
+    url = url_match.group(0) if url_match else None
+    return {
+        "success": True,
+        "confirmation": f"It's live, sir." if url else "Deployed, sir.",
+        "url": url,
+    }
+
+
+async def git_commit_project(project_dir: str, message: str) -> dict:
+    """Commit all changes in a project directory. Initializes a repo on first use."""
+    if not project_dir or not os.path.isdir(project_dir):
+        return {"success": False, "confirmation": "No project directory to commit, sir."}
+
+    git_dir = os.path.join(project_dir, ".git")
+    if not os.path.isdir(git_dir):
+        await _run(["git", "init"], cwd=project_dir, timeout=30)
+        await _run(["git", "checkout", "-b", "main"], cwd=project_dir, timeout=30)
+
+    await _run(["git", "add", "-A"], cwd=project_dir, timeout=60)
+    ok, output = await _run(["git", "commit", "-m", message], cwd=project_dir, timeout=60)
+
+    if not ok and "nothing to commit" in output.lower():
+        return {"success": True, "confirmation": "No changes to commit, sir."}
+
+    return {
+        "success": ok,
+        "confirmation": "Committed, sir." if ok else "Commit failed, sir.",
+    }
