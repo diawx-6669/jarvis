@@ -9,6 +9,7 @@ import { createOrb, type OrbState } from "./orb";
 import { createVoiceInput, createAudioPlayer } from "./voice";
 import { createSocket } from "./ws";
 import { openSettings, checkFirstTimeSetup } from "./settings";
+import { initLanguage, type Lang } from "./language";
 import "./style.css";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +52,20 @@ const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
 const WS_URL = `${wsProto}//${window.location.host}/ws/voice`;
 const socket = createSocket(WS_URL);
 
+// ---------------------------------------------------------------------------
+// Language (English by default; user can pick on first visit)
+// ---------------------------------------------------------------------------
+
+let currentLang: Lang = initLanguage((lang) => {
+  currentLang = lang;
+  socket.send({ type: "set_language", lang });
+  voiceInput.setLang(lang);
+});
+
+socket.onOpen(() => {
+  socket.send({ type: "set_language", lang: currentLang });
+});
+
 const audioPlayer = createAudioPlayer();
 orb.setAnalyser(audioPlayer.getAnalyser());
 
@@ -85,12 +100,13 @@ const voiceInput = createVoiceInput(
     // Cancel any current JARVIS response before sending new input
     audioPlayer.stop();
     // User spoke — send transcript
-    socket.send({ type: "transcript", text, isFinal: true });
+    socket.send({ type: "transcript", text, isFinal: true, lang: currentLang });
     transition("thinking");
   },
   (msg: string) => {
     showError(msg);
-  }
+  },
+  currentLang
 );
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ export interface VoiceInput {
   stop(): void;
   pause(): void;
   resume(): void;
+  setLang(lang: "en" | "ru"): void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -18,19 +19,20 @@ declare const webkitSpeechRecognition: any;
 
 export function createVoiceInput(
   onTranscript: (text: string) => void,
-  onError: (msg: string) => void
+  onError: (msg: string) => void,
+  lang: "en" | "ru" = "en"
 ): VoiceInput {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const SR = (window as any).SpeechRecognition || (typeof webkitSpeechRecognition !== "undefined" ? webkitSpeechRecognition : null);
   if (!SR) {
     onError("Speech recognition not supported in this browser");
-    return { start() {}, stop() {}, pause() {}, resume() {} };
+    return { start() {}, stop() {}, pause() {}, resume() {}, setLang() {} };
   }
 
   const recognition = new SR();
   recognition.continuous = true;
   recognition.interimResults = true;
-  recognition.lang = "en-US";
+  recognition.lang = lang === "ru" ? "ru-RU" : "en-US";
 
   let shouldListen = false;
   let paused = false;
@@ -93,6 +95,17 @@ export function createVoiceInput(
           recognition.start();
         } catch {
           // Already started
+        }
+      }
+    },
+    setLang(newLang: "en" | "ru") {
+      recognition.lang = newLang === "ru" ? "ru-RU" : "en-US";
+      // Restart recognition so the new language takes effect immediately
+      if (shouldListen && !paused) {
+        try {
+          recognition.stop();
+        } catch {
+          // Will auto-restart via onend handler
         }
       }
     },

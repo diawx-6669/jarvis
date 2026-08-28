@@ -71,6 +71,7 @@ FISH_API_URL = "https://api.fish.audio/v1/tts"
 # en-GB-RyanNeural / en-GB-ThomasNeural - спокойный британский мужской, ближе
 # всего по духу к JARVIS. Полный список: `edge-tts --list-voices`
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-GB-RyanNeural")
+EDGE_TTS_VOICE_RU = os.getenv("EDGE_TTS_VOICE_RU", "ru-RU-DmitryNeural")
 EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+0%")
 EDGE_TTS_PITCH = os.getenv("EDGE_TTS_PITCH", "-5Hz")
 USER_NAME = os.getenv("USER_NAME", "sir")
@@ -1104,7 +1105,7 @@ _last_greeting_time: float = 0
 # TTS (Microsoft Edge Neural TTS - бесплатно, без ключей)
 # ---------------------------------------------------------------------------
 
-async def synthesize_speech(text: str) -> Optional[bytes]:
+async def synthesize_speech(text: str, lang: str = "en") -> Optional[bytes]:
     """Generate speech audio from text using free Edge Neural TTS.
 
     Раньше здесь был платный Fish Audio API. Теперь - бесплатный
@@ -1114,9 +1115,11 @@ async def synthesize_speech(text: str) -> Optional[bytes]:
     if not text:
         return None
 
+    voice = EDGE_TTS_VOICE_RU if lang == "ru" else EDGE_TTS_VOICE
+
     try:
         communicate = edge_tts.Communicate(
-            text, voice=EDGE_TTS_VOICE, rate=EDGE_TTS_RATE, pitch=EDGE_TTS_PITCH
+            text, voice=voice, rate=EDGE_TTS_RATE, pitch=EDGE_TTS_PITCH
         )
         audio_chunks = bytearray()
         async for chunk in communicate.stream():
@@ -1147,6 +1150,7 @@ async def generate_response(
     conversation_history: list[dict],
     last_response: str = "",
     session_summary: str = "",
+    lang: str = "en",
 ) -> str:
     """Generate a JARVIS response using Anthropic API."""
     now = datetime.now()
@@ -1177,6 +1181,11 @@ async def generate_response(
     )
     if lookup_status:
         system += f"\n\nACTIVE LOOKUPS:\n{lookup_status}\nIf asked about progress, report this status."
+
+    if lang == "ru":
+        system += "\n\nIMPORTANT: Respond ONLY in Russian (по-русски), regardless of the language of any examples above."
+    else:
+        system += "\n\nIMPORTANT: Respond ONLY in English, regardless of the language of any examples above."
 
     # Inject relevant memories and tasks
     memory_ctx = build_memory_context(text)
@@ -1946,6 +1955,9 @@ async def voice_handler(ws: WebSocket):
     # Audio collision prevention — track when user last spoke
     voice_state = {"last_user_time": 0.0}
 
+    # Language preference for this session — set by frontend, default English
+    session_lang = "en"
+
     # Self-awareness — track last spoken response to avoid repetition
     last_jarvis_response = ""
 
@@ -1961,12 +1973,6 @@ async def voice_handler(ws: WebSocket):
         # ── Greeting — always start in conversation mode ──
         now = datetime.now()
         hour = now.hour
-        if hour < 12:
-            greeting = "Good morning, sir."
-        elif hour < 17:
-            greeting = "Good afternoon, sir."
-        else:
-            greeting = "Good evening, sir."
 
         global _last_greeting_time
         should_greet = (time.time() - _last_greeting_time) > 60
@@ -1975,8 +1981,15 @@ async def voice_handler(ws: WebSocket):
             _last_greeting_time = time.time()
 
             async def _send_greeting():
+                # Give the frontend a brief window to send its language preference
+                # before we pick the greeting text/voice.
+                await asyncio.sleep(0.15)
+                if session_lang == "ru":
+                    greeting = "Доброе утро, сэр." if hour < 12 else ("Добрый день, сэр." if hour < 17 else "Добрый вечер, сэр.")
+                else:
+                    greeting = "Good morning, sir." if hour < 12 else ("Good afternoon, sir." if hour < 17 else "Good evening, sir.")
                 try:
-                    audio_bytes = await synthesize_speech(greeting)
+                    audio_bytes = await synthesize_speech(greeting, lang=session_lang)
                     if audio_bytes:
                         encoded = base64.b64encode(audio_bytes).decode()
                         await ws.send_json({"type": "status", "state": "speaking"})
@@ -2007,8 +2020,18 @@ async def voice_handler(ws: WebSocket):
                 await ws.send_json({"type": "text", "text": response_text})
                 continue
 
+            if msg.get("type") == "set_language":
+                lang_val = msg.get("lang", "en")
+                session_lang = "ru" if lang_val == "ru" else "en"
+                log.info(f"Session language set to: {session_lang}")
+                continue
+
             if msg.get("type") != "transcript" or not msg.get("isFinal"):
                 continue
+
+            # Allow language to be sent alongside a transcript too
+            if msg.get("lang"):
+                session_lang = "ru" if msg.get("lang") == "ru" else "en"
 
             user_text = apply_speech_corrections(msg.get("text", "").strip())
             if not user_text:
@@ -2103,6 +2126,7 @@ async def voice_handler(ws: WebSocket):
                             cached_projects, history,
                             last_response=last_jarvis_response,
                             session_summary=session_summary,
+                            lang=session_lang,
                         )
                     else:
                         # Send to claude -p (full power)
@@ -2205,6 +2229,7 @@ async def voice_handler(ws: WebSocket):
                                 cached_projects, history,
                                 last_response=last_jarvis_response,
                                 session_summary=session_summary,
+                                lang=session_lang,
                             )
 
                             # Check for action tags embedded in LLM response
@@ -2309,7 +2334,7 @@ async def voice_handler(ws: WebSocket):
                 # TTS
                 tts = strip_markdown_for_tts(response_text)
                 await ws.send_json({"type": "status", "state": "speaking"})
-                audio = await synthesize_speech(tts)
+                audio = await synthesize_speech(tts, lang=session_lang)
                 if audio:
                     await ws.send_json({"type": "audio", "data": base64.b64encode(audio).decode(), "text": response_text})
                 else:
