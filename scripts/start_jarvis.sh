@@ -15,7 +15,12 @@ if ! lsof -nP -iTCP:8340 -sTCP:LISTEN >/dev/null 2>&1; then
   echo $! > logs/backend.pid
 fi
 
-# Frontend (Vite dev server)
+# Frontend (Vite dev server). Replace an unrelated/stale process that would
+# otherwise make Chrome show a 404 page on JARVIS's port.
+if lsof -nP -iTCP:5173 -sTCP:LISTEN >/dev/null 2>&1 && ! curl -fsS http://localhost:5173/ 2>/dev/null | grep -q 'orb-canvas'; then
+  lsof -tiTCP:5173 -sTCP:LISTEN | xargs kill
+  sleep 1
+fi
 if ! lsof -nP -iTCP:5173 -sTCP:LISTEN >/dev/null 2>&1; then
   cd "$JARVIS_DIR/frontend"
   nohup npm run dev >> ../logs/frontend.log 2>&1 &
