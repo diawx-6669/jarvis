@@ -42,7 +42,7 @@ JARVIS connects to your Apple Calendar, Mail, and Notes. It can browse the web, 
 The fastest way to get running:
 
 ```bash
-git clone https://github.com/yourusername/jarvis.git
+git clone https://github.com/diawx/jarvis.git
 cd jarvis
 claude
 ```
@@ -53,7 +53,7 @@ Claude Code will read the project's `CLAUDE.md` and walk you through setup step 
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/yourusername/jarvis.git
+git clone https://github.com/diawx/jarvis.git
 cd jarvis
 
 # 2. Set up environment
@@ -183,11 +183,11 @@ Please open an issue before submitting large PRs so we can discuss the approach.
 
 ## License
 
-Free for personal, non-commercial use. Commercial use requires a license — visit [ethanplus.ai](https://ethanplus.ai) for inquiries. See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE) for details.
 
 ## Credits
 
-Built by [Ethan](https://ethanplus.ai).
+Built by diawx.
 
 Powered by [Anthropic Claude](https://anthropic.com) and [Fish Audio](https://fish.audio).
 
