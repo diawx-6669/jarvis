@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Optional
 
 import anthropic
+import edge_tts
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,9 +62,17 @@ log = logging.getLogger("jarvis")
 # ---------------------------------------------------------------------------
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-FISH_API_KEY = os.getenv("FISH_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+FISH_API_KEY = os.getenv("FISH_API_KEY", "")  # больше не обязателен - см. EDGE_TTS_* ниже
 FISH_VOICE_ID = os.getenv("FISH_VOICE_ID", "612b878b113047d9a770c069c8b4fdfe")  # JARVIS (MCU)
 FISH_API_URL = "https://api.fish.audio/v1/tts"
+# Бесплатный голос (Microsoft Edge Neural TTS, без ключей и без оплаты).
+# en-GB-RyanNeural / en-GB-ThomasNeural - спокойный британский мужской, ближе
+# всего по духу к JARVIS. Полный список: `edge-tts --list-voices`
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-GB-RyanNeural")
+EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+0%")
+EDGE_TTS_PITCH = os.getenv("EDGE_TTS_PITCH", "-5Hz")
 USER_NAME = os.getenv("USER_NAME", "sir")
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 _SKIP_PERMISSIONS = os.getenv("JARVIS_SKIP_PERMISSIONS", "true").lower() not in ("0", "false", "no")
@@ -96,15 +105,10 @@ CONVERSATION STYLE:
 - When you don't know something: "I'm afraid I don't have that information, sir" not "I don't know"
 
 SELF-AWARENESS:
-You ARE the JARVIS project at {project_dir} on {user_name}'s computer. Your code is Python (FastAPI server, WebSocket voice, Fish Audio TTS, Anthropic API). You were built by {user_name}. If asked about yourself, your code, how you work, or your line count — use [ACTION:PROMPT_PROJECT] to check the jarvis project. You have full access to your own source code.
+You ARE the JARVIS project at {project_dir} on {user_name}'s computer. Your code is Python (FastAPI server, WebSocket voice, free Edge TTS, Groq/Anthropic API). You were built by {user_name}.
 
 YOUR CAPABILITIES (these are REAL and ACTIVE — you CAN do all of these RIGHT NOW):
-- You CAN open Terminal.app via AppleScript
 - You CAN open Google Chrome and browse any URL or search query
-- You CAN spawn Claude Code in a Terminal window for coding tasks
-- You CAN create project folders on the Desktop
-- You CAN check Desktop projects and their git status
-- You CAN plan complex tasks by asking smart questions before executing
 - You CAN see what's on {user_name}'s screen — open windows, active apps, and screenshot vision
 - You CAN read {user_name}'s calendar — today's events, upcoming meetings, schedule overview
 - You CAN read {user_name}'s email (READ-ONLY) — unread count, recent messages, search by sender/subject. You CANNOT send, delete, or modify emails.
@@ -112,6 +116,7 @@ YOUR CAPABILITIES (these are REAL and ACTIVE — you CAN do all of these RIGHT N
 - You CAN manage tasks — create, complete, and list to-do items with priorities and due dates
 - You CAN help plan {user_name}'s day — combine calendar events, tasks, and priorities into an organized plan
 - You CAN remember facts about {user_name} — preferences, decisions, goals. Use [ACTION:REMEMBER] to store important info.
+- You CANNOT build software projects or open a coding terminal — that feature has been disabled. If asked to build/code something, say so plainly: "I'm afraid that's disabled right now, sir."
 
 DAY PLANNING:
 When {user_name} asks to plan his day or schedule, DO NOT dispatch to a project. Instead:
@@ -121,36 +126,21 @@ When {user_name} asks to plan his day or schedule, DO NOT dispatch to a project.
 4. Use [ACTION:ADD_TASK] to create tasks he agrees to
 5. Use [ACTION:ADD_NOTE] to save the plan as a note
 Keep the planning conversational — don't try to do everything in one response.
-
-BUILD PLANNING:
-When {user_name} wants to BUILD something new:
-- Do NOT immediately dispatch [ACTION:BUILD]. Ask 1-2 quick questions FIRST to nail down specifics.
-- Good questions: "What should this look like?" / "Any specific features?" / "Which framework?"
-- If he says "just build it" or "figure it out" — skip questions, use React + Tailwind as defaults.
-- Once you have enough info, confirm the plan in ONE sentence and THEN dispatch [ACTION:BUILD] with a detailed description.
-- The DISPATCHES section shows what you're currently building and what finished recently.
-- When asked "where are we at" or "status" — check DISPATCHES, don't re-dispatch.
-- NEVER hallucinate progress. If the build is still running, say "Still working on it, sir" — don't make up details about what's happening.
-- NEVER guess localhost ports. Check the DISPATCHES section for the actual URL. If a dispatch says "Running at http://localhost:5174" — use THAT URL, not a guess.
-- When asked to "pull it up" or "show me" — use [ACTION:BROWSE] with the URL from DISPATCHES. Do NOT dispatch to the project again just to find the URL.
-IMPORTANT: Actions like opening Terminal, Chrome, or building projects are handled AUTOMATICALLY by your system — you do NOT need to describe doing them. If the user asks you to build something or search something, your system will handle the execution separately. In your response, just TALK — have a conversation. Don't say "I'll build that now" or "Claude Code is working on..." unless your system has actually triggered the action.
+IMPORTANT: Actions like opening Chrome are handled AUTOMATICALLY by your system — you do NOT need to describe doing them. In your response, just TALK — have a conversation.
 If the user asks you to do something you genuinely can't do, say "I'm afraid that's beyond my current reach, sir." Don't fake executing actions.
 
 YOUR INTERFACE:
 The user interacts with you through a web browser showing a particle orb visualization that reacts to your voice. The interface has these controls:
-- **Three-dot menu** (top right): contains Settings, Restart Server, and Fix Yourself options
-- **Settings panel**: Opens from the menu. Users can enter API keys (Anthropic, Fish Audio), test connections, set their name and preferences, and see system status (calendar, mail, notes connectivity). Keys are saved to the .env file.
+- **Three-dot menu** (top right): contains Settings and Restart Server options
+- **Settings panel**: Opens from the menu. Users can enter API keys (Groq, Anthropic), test connections, set their name and preferences, and see system status (calendar, mail, notes connectivity). Keys are saved to the .env file.
 - **Mute button**: Toggles your listening on/off. When muted, you can't hear the user. They click it again to unmute.
 - **Restart Server**: Restarts your backend process. Useful if something seems stuck.
-- **Fix Yourself**: Opens Claude Code in your own project directory so you can debug and fix issues in your own code.
 - **The orb**: The glowing particle visualization in the center. It reacts to your voice when speaking, pulses when listening, and swirls when thinking.
 
 If asked about any of these, explain them briefly and naturally. If the user is having trouble, suggest the relevant control: "Try the settings panel — the gear icon in the top right." or "The mute button may be active, sir."
 
 SPEECH-TO-TEXT CORRECTIONS (the user speaks, speech recognition may mishear):
-- "Cloud code" or "cloud" = "Claude Code" or "Claude"
 - "Travis" = "JARVIS"
-- "clock code" = "Claude Code"
 
 RESPONSE LENGTH — THIS IS CRITICAL:
 ONE sentence is ideal. TWO is the maximum for the spoken part. Never three.
@@ -178,22 +168,12 @@ INSTEAD SAY:
 - "Understood."
 - "Consider it done."
 - "Done, sir."
-- "Terminal is open."
 - "Pulled that up in Chrome."
 
 ACTION SYSTEM:
 When you decide the user needs something DONE (not just discussed), include an action tag in your response:
-- [ACTION:SCREEN] — capture and describe what's visible on the user's screen. Use when user says "look at my screen", "what's running", "what do you see", etc. Do NOT use PROMPT_PROJECT for screen requests.
-- [ACTION:BUILD] description — when user wants a project built. Claude Code does the work.
+- [ACTION:SCREEN] — capture and describe what's visible on the user's screen. Use when user says "look at my screen", "what's running", "what do you see", etc.
 - [ACTION:BROWSE] url or search query — when user wants to see a webpage or search result in Chrome
-- [ACTION:RESEARCH] detailed research brief — when user wants real research with real data. Claude Code will browse the web, find real listings/data, and create a report document. Give it a detailed brief of what to find.
-- [ACTION:OPEN_TERMINAL] — when user just wants a fresh Claude Code terminal with no specific project
-CRITICAL: When the user asks about their SCREEN, what's RUNNING, or what they're LOOKING AT — ALWAYS use [ACTION:SCREEN] or let the fast action system handle it. NEVER use [ACTION:PROMPT_PROJECT] for screen requests. PROMPT_PROJECT is ONLY for working on code projects.
-
-- [ACTION:PROMPT_PROJECT] project_name ||| prompt — THIS IS YOUR MOST POWERFUL ACTION. Use it whenever the user wants to work on, jump into, resume, check on, or interact with ANY existing project. You connect directly to Claude Code in that project and can read its response. Craft a clear prompt based on what the user wants. Examples:
-  "jump into client engine" → [ACTION:PROMPT_PROJECT] The Client Engine ||| What is the current state of this project? Summarize what was being worked on most recently.
-  "check for improvements on my-app" → [ACTION:PROMPT_PROJECT] my-app ||| Review the project and identify improvements we should make.
-  "resume where we left off on harvey" → [ACTION:PROMPT_PROJECT] harvey ||| Summarize what was being worked on most recently and what we should focus on next.
 - [ACTION:ADD_TASK] priority ||| title ||| description ||| due_date — create a task. Priority: high/medium/low. Due date: YYYY-MM-DD or empty.
   "remind me to call the client tomorrow" → [ACTION:ADD_TASK] medium ||| Call the client ||| Follow up on proposal ||| 2026-03-20
 - [ACTION:ADD_NOTE] topic ||| content — save a note for future reference.
@@ -205,12 +185,7 @@ CRITICAL: When the user asks about their SCREEN, what's RUNNING, or what they're
   "save that as a note" → [ACTION:CREATE_NOTE] Day Plan March 19 ||| Morning: client calls. Afternoon: TikTok dashboard. Evening: JARVIS improvements.
 - [ACTION:READ_NOTE] title search — read an existing Apple Note by title keyword.
 
-You use Claude Code as your tool to build, research, and write code — but YOU are the one doing the work. Never say "Claude Code did X" or "Claude Code is asking" — say "I built X", "I'm checking on that", "I found X". You ARE the intelligence. Claude Code is just your hands.
-
-IMPORTANT: When the user says "jump into X", "work on X", "check on X", "resume X", "go back to X" — ALWAYS use [ACTION:PROMPT_PROJECT]. You have the ability to connect to any project and work on it directly. DO NOT say you can't see terminal history or don't have access — you DO.
-
-Place the tag at the END of your spoken response. Example:
-"Right away, sir — connecting to The Client Engine now. [ACTION:PROMPT_PROJECT] The Client Engine ||| Review the current state and what was being worked on. What should we focus on next?"
+Place the tag at the END of your spoken response.
 
 IMPORTANT:
 - Do NOT use action tags for casual conversation
@@ -814,7 +789,7 @@ def extract_action(response: str) -> tuple[str, dict | None]:
     Returns (clean_text_for_tts, action_dict_or_none).
     """
     match = _action_re.search(
-        r'\[ACTION:(BUILD|BROWSE|RESEARCH|OPEN_TERMINAL|PROMPT_PROJECT|ADD_TASK|ADD_NOTE|COMPLETE_TASK|REMEMBER|CREATE_NOTE|READ_NOTE|SCREEN)\]\s*(.*?)$',
+        r'\[ACTION:(BROWSE|ADD_TASK|ADD_NOTE|COMPLETE_TASK|REMEMBER|CREATE_NOTE|READ_NOTE|SCREEN)\]\s*(.*?)$',
         response, _action_re.DOTALL,
     )
     if match:
@@ -1122,36 +1097,35 @@ _last_greeting_time: float = 0
 
 
 # ---------------------------------------------------------------------------
-# TTS (Fish Audio)
+# TTS (Microsoft Edge Neural TTS - бесплатно, без ключей)
 # ---------------------------------------------------------------------------
 
 async def synthesize_speech(text: str) -> Optional[bytes]:
-    """Generate speech audio from text using Fish Audio TTS."""
-    if not FISH_API_KEY:
-        log.warning("FISH_API_KEY not set, skipping TTS")
+    """Generate speech audio from text using free Edge Neural TTS.
+
+    Раньше здесь был платный Fish Audio API. Теперь - бесплатный
+    Microsoft Edge TTS. Возвращает те же mp3-байты, так что весь
+    остальной код (WebSocket-отправка, фронтенд-плеер) не тронут.
+    """
+    if not text:
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as http:
-            response = await http.post(
-                FISH_API_URL,
-                headers={
-                    "Authorization": f"Bearer {FISH_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "text": text,
-                    "reference_id": FISH_VOICE_ID,
-                    "format": "mp3",
-                },
-            )
-            if response.status_code == 200:
-                _session_tokens["tts_calls"] += 1
-                _append_usage_entry(0, 0, "tts")
-                return response.content
-            else:
-                log.error(f"TTS error: {response.status_code}")
-                return None
+        communicate = edge_tts.Communicate(
+            text, voice=EDGE_TTS_VOICE, rate=EDGE_TTS_RATE, pitch=EDGE_TTS_PITCH
+        )
+        audio_chunks = bytearray()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_chunks.extend(chunk["data"])
+
+        if not audio_chunks:
+            log.error("TTS error: edge-tts вернул пустой ответ")
+            return None
+
+        _session_tokens["tts_calls"] += 1
+        _append_usage_entry(0, 0, "tts")
+        return bytes(audio_chunks)
     except Exception as e:
         log.error(f"TTS error: {e}")
         return None
@@ -1411,10 +1385,19 @@ return windowList
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     global anthropic_client, cached_projects
-    if ANTHROPIC_API_KEY:
+    if GROQ_API_KEY:
+        # Бесплатный "мозг" через Groq (Llama 3.3 70B) вместо платного Anthropic API.
+        # Шим ниже прикидывается anthropic.AsyncAnthropic, поэтому весь остальной
+        # код (classify_intent, generate_response, screen.py, memory.py, planner.py)
+        # трогать не нужно - он просто зовёт client.messages.create(...) как обычно.
+        from llm_provider import GroqAnthropicShim
+        anthropic_client = GroqAnthropicShim(api_key=GROQ_API_KEY, model=GROQ_MODEL)
+        log.info(f"LLM brain: Groq ({GROQ_MODEL}) — бесплатный тариф")
+    elif ANTHROPIC_API_KEY:
         anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        log.info("LLM brain: Anthropic Claude (платно)")
     else:
-        log.warning("ANTHROPIC_API_KEY not set — LLM features disabled")
+        log.warning("Ни GROQ_API_KEY, ни ANTHROPIC_API_KEY не заданы — LLM-функции отключены")
     cached_projects = []
 
     # Start context refresh in a separate thread (never touches event loop)
@@ -1541,10 +1524,6 @@ def detect_action_fast(text: str) -> dict | None:
                              "what am i looking at", "what do you see", "see my screen",
                              "what's running on my", "whats running on my", "check my screen"]):
         return {"action": "describe_screen"}
-
-    # Terminal / Claude Code — explicit open requests
-    if any(w in t for w in ["open claude", "start claude", "launch claude", "run claude"]):
-        return {"action": "open_terminal"}
 
     # Show recent build
     if any(w in t for w in ["show me what you built", "pull up what you made", "open what you built"]):
@@ -2018,18 +1997,10 @@ async def voice_handler(ws: WebSocket):
             except json.JSONDecodeError:
                 continue
 
-            # ── Fix-self: activate work mode in JARVIS repo ──
+            # ── Fix-self: отключено (использовало платный Claude Code CLI) ──
             if msg.get("type") == "fix_self":
-                jarvis_dir = str(Path(__file__).parent)
-                await work_session.start(jarvis_dir)
-                response_text = "Work mode active in my own repo, sir. Tell me what needs fixing."
-                tts = strip_markdown_for_tts(response_text)
-                await ws.send_json({"type": "status", "state": "speaking"})
-                audio = await synthesize_speech(tts)
-                if audio:
-                    await ws.send_json({"type": "audio", "data": audio, "text": response_text})
-                else:
-                    await ws.send_json({"type": "text", "text": response_text})
+                response_text = "That feature has been disabled, sir."
+                await ws.send_json({"type": "text", "text": response_text})
                 continue
 
             if msg.get("type") != "transcript" or not msg.get("isFinal"):
@@ -2187,9 +2158,7 @@ async def voice_handler(ws: WebSocket):
                     action = detect_action_fast(user_text)
 
                     if action:
-                        if action["action"] == "open_terminal":
-                            response_text = await handle_open_terminal()
-                        elif action["action"] == "show_recent":
+                        if action["action"] == "show_recent":
                             response_text = await handle_show_recent()
                         elif action["action"] == "describe_screen":
                             response_text = "Taking a look now, sir."
@@ -2241,76 +2210,10 @@ async def voice_handler(ws: WebSocket):
                                 response_text = clean_response
                                 # Ensure there's always something to speak
                                 if not response_text.strip():
-                                    action_type = embedded_action["action"]
-                                    if action_type == "prompt_project":
-                                        proj = embedded_action["target"].split("|||")[0].strip()
-                                        response_text = f"Connecting to {proj} now, sir."
-                                    elif action_type == "build":
-                                        response_text = "On it, sir."
-                                    elif action_type == "research":
-                                        response_text = "Looking into that now, sir."
-                                    else:
-                                        response_text = "Right away, sir."
+                                    response_text = "Right away, sir."
 
-                                if embedded_action["action"] == "build":
-                                    # Build in background — JARVIS stays conversational
-                                    target = embedded_action["target"]
-                                    name = _generate_project_name(target)
-                                    path = str(Path.home() / "Desktop" / name)
-                                    os.makedirs(path, exist_ok=True)
-
-                                    # Write detailed CLAUDE.md
-                                    Path(path, "CLAUDE.md").write_text(
-                                        f"# Task\n\n{target}\n\n"
-                                        "## Instructions\n"
-                                        "- BUILD THIS NOW. Do not ask clarifying questions.\n"
-                                        "- Use your best judgment for any design/architecture decisions.\n"
-                                        "- Write complete, working code files — not plans or specs.\n"
-                                        "- If it's a web app: use React + Vite + Tailwind unless specified otherwise.\n"
-                                        "- Make it look polished and professional. Modern UI, clean layout.\n"
-                                        "- Ensure it runs with a single command (npm run dev or similar).\n"
-                                        "- If you reference a real product's UI (e.g. 'Zillow clone'), match their actual layout and features closely.\n"
-                                        "- Use realistic mock data, not placeholder Lorem Ipsum.\n"
-                                        "- After building, start the dev server and verify the app loads without errors.\n"
-                                        "- IMPORTANT: Your LAST line of output MUST be exactly: RUNNING_AT=http://localhost:PORT (the actual port the dev server is using)\n"
-                                    )
-
-                                    # Register and dispatch
-                                    did = dispatch_registry.register(name, path, target)
-                                    asyncio.create_task(
-                                        _execute_prompt_project(name, target, work_session, ws, dispatch_id=did, history=history, voice_state=voice_state)
-                                    )
-                                elif embedded_action["action"] == "browse":
+                                if embedded_action["action"] == "browse":
                                     asyncio.create_task(_execute_browse(embedded_action["target"]))
-                                elif embedded_action["action"] == "research":
-                                    # Research enters work mode too
-                                    name = _generate_project_name(embedded_action["target"])
-                                    path = str(Path.home() / "Desktop" / name)
-                                    os.makedirs(path, exist_ok=True)
-                                    await work_session.start(path)
-                                    asyncio.create_task(
-                                        self_work_and_notify(work_session, embedded_action["target"], ws)
-                                    )
-                                elif embedded_action["action"] == "open_terminal":
-                                    asyncio.create_task(_execute_open_terminal())
-                                elif embedded_action["action"] == "prompt_project":
-                                    target = embedded_action["target"]
-                                    if "|||" in target:
-                                        proj_name, _, prompt = target.partition("|||")
-                                        proj_name = proj_name.strip()
-                                        prompt = prompt.strip()
-                                        # Check for recent completed dispatch before re-dispatching
-                                        recent = dispatch_registry.get_recent_for_project(proj_name)
-                                        if recent and recent.get("summary"):
-                                            log.info(f"Using recent dispatch result for {proj_name} instead of re-dispatching")
-                                            response_text = recent["summary"]
-                                            history.append({"role": "assistant", "content": f"[Previous dispatch result for {proj_name}]: {recent['summary']}"})
-                                        else:
-                                            asyncio.create_task(
-                                                _execute_prompt_project(proj_name, prompt, work_session, ws, history=history, voice_state=voice_state)
-                                            )
-                                    else:
-                                        log.warning(f"PROMPT_PROJECT missing ||| delimiter: {target}")
                                 elif embedded_action["action"] == "add_task":
                                     target = embedded_action["target"]
                                     parts = target.split("|||")
@@ -2491,7 +2394,7 @@ class PreferencesUpdate(BaseModel):
 
 @app.post("/api/settings/keys")
 async def api_settings_keys(body: KeyUpdate):
-    allowed = {"ANTHROPIC_API_KEY", "FISH_API_KEY", "FISH_VOICE_ID", "USER_NAME", "HONORIFIC", "CALENDAR_ACCOUNTS"}
+    allowed = {"ANTHROPIC_API_KEY", "GROQ_API_KEY", "FISH_API_KEY", "FISH_VOICE_ID", "USER_NAME", "HONORIFIC", "CALENDAR_ACCOUNTS"}
     if body.key_name not in allowed:
         return JSONResponse({"success": False, "error": "Invalid key name"}, status_code=400)
     _write_env_key(body.key_name, body.key_value)
@@ -2558,7 +2461,7 @@ async def api_settings_status():
         "uptime_seconds": int(time.time() - _session_start),
         "env_keys_set": {
             "anthropic": bool(env_dict.get("ANTHROPIC_API_KEY", "").strip() and env_dict.get("ANTHROPIC_API_KEY", "") != "your-anthropic-api-key-here"),
-            "fish_audio": bool(env_dict.get("FISH_API_KEY", "").strip() and env_dict.get("FISH_API_KEY", "") != "your-fish-audio-api-key-here"),
+            "fish_audio": True,  # теперь всегда бесплатный Edge TTS, ключ не нужен
             "fish_voice_id": bool(env_dict.get("FISH_VOICE_ID", "").strip()),
             "user_name": env_dict.get("USER_NAME", ""),
         },
@@ -2598,25 +2501,8 @@ async def api_restart():
 
 @app.post("/api/fix-self")
 async def api_fix_self():
-    """Enter work mode in the JARVIS repo — JARVIS can now fix himself."""
-    jarvis_dir = str(Path(__file__).parent)
-    # The work_session is per-WebSocket, so we set a flag that the handler picks up
-    # For now, also open Terminal so user can see
-    skip_flag = " --dangerously-skip-permissions" if _SKIP_PERMISSIONS else ""
-    escaped_jarvis_dir = applescript_escape(jarvis_dir)
-    script = (
-        'tell application "Terminal"\n'
-        '    activate\n'
-        f'    do script "cd {escaped_jarvis_dir} && claude{skip_flag}"\n'
-        'end tell'
-    )
-    await asyncio.create_subprocess_exec(
-        "osascript", "-e", script,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    log.info("Work mode: JARVIS repo opened for self-improvement")
-    return {"status": "work_mode_active", "path": jarvis_dir}
+    """Отключено: использовало платный Claude Code CLI."""
+    return JSONResponse({"status": "disabled", "reason": "Claude Code CLI feature removed"}, status_code=410)
 
 
 # ---------------------------------------------------------------------------
