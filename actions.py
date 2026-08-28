@@ -161,6 +161,30 @@ async def open_chrome(url: str) -> dict:
     return await open_browser(url, "chrome")
 
 
+async def open_app(app_name: str) -> dict:
+    """Launch/activate any macOS application by name (e.g. 'Spotify', 'Telegram')."""
+    app_name = app_name.strip().strip('"')
+    if not app_name:
+        return {"success": False, "confirmation": "I didn't catch which app to open, sir."}
+
+    escaped_name = app_name.replace('"', '\\"')
+    script = f'tell application "{escaped_name}" to activate'
+
+    proc = await asyncio.create_subprocess_exec(
+        "osascript", "-e", script,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    success = proc.returncode == 0
+    if not success:
+        log.error(f"open_app ({app_name}) failed: {stderr.decode()}")
+    return {
+        "success": success,
+        "confirmation": f"Opening {app_name}, sir." if success else f"I couldn't find or open {app_name}, sir.",
+    }
+
+
 async def open_claude_in_project(project_dir: str, prompt: str) -> dict:
     """Open Terminal, cd to project dir, run Claude Code interactively.
 

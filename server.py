@@ -40,7 +40,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from actions import execute_action, monitor_build, open_terminal, open_browser, open_claude_in_project, _generate_project_name, prompt_existing_terminal, applescript_escape
+from actions import execute_action, monitor_build, open_terminal, open_browser, open_claude_in_project, _generate_project_name, prompt_existing_terminal, applescript_escape, open_app
 from work_mode import WorkSession, is_casual_question
 from screen import get_active_windows, take_screenshot, describe_screen, format_windows_for_context
 from calendar_access import get_todays_events, get_upcoming_events, get_next_event, format_events_for_context, format_schedule_summary, refresh_cache as refresh_calendar_cache
@@ -174,6 +174,10 @@ ACTION SYSTEM:
 When you decide the user needs something DONE (not just discussed), include an action tag in your response:
 - [ACTION:SCREEN] — capture and describe what's visible on the user's screen. Use when user says "look at my screen", "what's running", "what do you see", etc.
 - [ACTION:BROWSE] url or search query — when user wants to see a webpage or search result in Chrome
+- [ACTION:OPEN_APP] app name — when user wants to open/launch a macOS application that is NOT the browser (e.g. Spotify, Telegram, WhatsApp, Discord, Notes, Music, Finder, Slack, VS Code).
+  "open Spotify" → [ACTION:OPEN_APP] Spotify
+  "open Telegram" → [ACTION:OPEN_APP] Telegram
+  Use the app's exact display name as it appears in macOS.
 - [ACTION:ADD_TASK] priority ||| title ||| description ||| due_date — create a task. Priority: high/medium/low. Due date: YYYY-MM-DD or empty.
   "remind me to call the client tomorrow" → [ACTION:ADD_TASK] medium ||| Call the client ||| Follow up on proposal ||| 2026-03-20
 - [ACTION:ADD_NOTE] topic ||| content — save a note for future reference.
@@ -789,7 +793,7 @@ def extract_action(response: str) -> tuple[str, dict | None]:
     Returns (clean_text_for_tts, action_dict_or_none).
     """
     match = _action_re.search(
-        r'\[ACTION:(BROWSE|ADD_TASK|ADD_NOTE|COMPLETE_TASK|REMEMBER|CREATE_NOTE|READ_NOTE|SCREEN)\]\s*(.*?)$',
+        r'\[ACTION:(BROWSE|ADD_TASK|ADD_NOTE|COMPLETE_TASK|REMEMBER|CREATE_NOTE|READ_NOTE|SCREEN|OPEN_APP)\]\s*(.*?)$',
         response, _action_re.DOTALL,
     )
     if match:
@@ -2214,6 +2218,9 @@ async def voice_handler(ws: WebSocket):
 
                                 if embedded_action["action"] == "browse":
                                     asyncio.create_task(_execute_browse(embedded_action["target"]))
+                                elif embedded_action["action"] == "open_app":
+                                    asyncio.create_task(open_app(embedded_action["target"]))
+                                    log.info(f"Opening app: {embedded_action['target']}")
                                 elif embedded_action["action"] == "add_task":
                                     target = embedded_action["target"]
                                     parts = target.split("|||")
