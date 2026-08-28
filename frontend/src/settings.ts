@@ -1,7 +1,7 @@
 /** A deliberately small first-run panel: enter keys once, then start talking. */
 
 interface StatusResponse {
-  env_keys_set: { anthropic: boolean; fish_audio: boolean; fish_voice_id: boolean };
+  env_keys_set: { groq: boolean; fish_audio: boolean; fish_voice_id: boolean };
 }
 
 let panelEl: HTMLElement | null = null;
@@ -27,7 +27,7 @@ function buildPanelHTML(): string {
       <div class="settings-welcome"><p>Enter your keys once. JARVIS is ready to listen.</p></div>
       <div class="settings-body">
         <section class="settings-section" id="section-api-keys">
-          <div class="settings-field"><label>Anthropic API Key</label><input type="password" id="input-anthropic-key" placeholder="sk-ant-..." autocomplete="off" /></div>
+          <div class="settings-field"><label>Groq API Key</label><input type="password" id="input-groq-key" placeholder="gsk_..." autocomplete="off" /></div>
           <div class="settings-field"><label>Fish Audio API Key <small>(optional)</small></label><input type="password" id="input-fish-key" placeholder="Fish Audio key" autocomplete="off" /></div>
           <div class="settings-field"><label>Fish Voice ID <small>(optional)</small></label><input type="text" id="input-fish-voice-id" placeholder="Voice ID" /></div>
           <div class="settings-actions"><button class="settings-btn primary" id="btn-save-keys">Save &amp; Start</button></div>
@@ -55,7 +55,7 @@ function wireEvents() {
   document.getElementById("settings-backdrop")?.addEventListener("click", closeSettings);
   document.getElementById("btn-save-keys")?.addEventListener("click", async () => {
     const entries = [
-      ["ANTHROPIC_API_KEY", (document.getElementById("input-anthropic-key") as HTMLInputElement).value.trim()],
+      ["GROQ_API_KEY", (document.getElementById("input-groq-key") as HTMLInputElement).value.trim()],
       ["FISH_API_KEY", (document.getElementById("input-fish-key") as HTMLInputElement).value.trim()],
       ["FISH_VOICE_ID", (document.getElementById("input-fish-voice-id") as HTMLInputElement).value.trim()],
     ];
@@ -90,7 +90,7 @@ export function closeSettings() {
 export async function checkFirstTimeSetup(): Promise<boolean> {
   try {
     const status = await apiGet<StatusResponse>("/api/settings/status");
-    if (!status.env_keys_set.anthropic) { openSettings(); return true; }
+    if (!status.env_keys_set.groq) { openSettings(); return true; }
   } catch { /* Server is still starting. */ }
   return false;
 }
