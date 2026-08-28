@@ -9,9 +9,16 @@ cd "$JARVIS_DIR"
 
 mkdir -p logs
 
+# This Mac's project dependencies are installed in Anaconda. Prefer that
+# interpreter, while still allowing a custom interpreter via JARVIS_PYTHON.
+PYTHON_BIN="${JARVIS_PYTHON:-python3}"
+if [ -x /opt/anaconda3/bin/python3 ]; then
+  PYTHON_BIN="/opt/anaconda3/bin/python3"
+fi
+
 # Backend (FastAPI + WebSocket). Avoid a second copy when launchd retries.
 if ! lsof -nP -iTCP:8340 -sTCP:LISTEN >/dev/null 2>&1; then
-  nohup python3 server.py --port 8340 --host 0.0.0.0 >> logs/backend.log 2>&1 &
+  nohup "$PYTHON_BIN" server.py --port 8340 --host 0.0.0.0 >> logs/backend.log 2>&1 &
   echo $! > logs/backend.pid
 fi
 
