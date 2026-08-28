@@ -42,6 +42,7 @@ from pydantic import BaseModel
 
 from actions import execute_action, monitor_build, open_terminal, open_browser, open_claude_in_project, _generate_project_name, prompt_existing_terminal, applescript_escape, open_app
 from music_access import play_song, pause_music, next_track, stop_music
+from spotify_access import play_song_spotify
 from actions import deploy_to_vercel, git_commit_project
 from work_mode import WorkSession, is_casual_question
 from screen import get_active_windows, take_screenshot, describe_screen, format_windows_for_context
@@ -2643,8 +2644,11 @@ async def api_fix_self():
 
 @app.post("/api/wake-music")
 async def api_wake_music():
-    """Play the user's licensed copy/Apple Music stream when JARVIS wakes."""
-    return await play_song("Should I Stay Or Should I Go The Clash")
+    """Play the wake song via Spotify. This endpoint is only ever hit from
+    the two "just woke up" triggers on the frontend: once on page load
+    (JARVIS starting up, e.g. right after the Mac boots) and once per clap —
+    never during normal use, so the song doesn't start at other times."""
+    return await play_song_spotify("Should I Stay Or Should I Go The Clash")
 
 
 # ---------------------------------------------------------------------------

@@ -61,7 +61,13 @@ let currentLang: Lang = initLanguage((lang) => {
   currentLang = lang;
   socket.send({ type: "set_language", lang });
   voiceInput.setLang(lang);
+  updateLangButton();
 });
+
+function updateLangButton() {
+  const btn = document.getElementById("btn-lang");
+  if (btn) btn.textContent = currentLang === "ru" ? "🌐 Язык: RU" : "🌐 Language: EN";
+}
 
 socket.onOpen(() => {
   socket.send({ type: "set_language", lang: currentLang });
@@ -102,6 +108,7 @@ function switchLanguage(lang: Lang) {
   voiceInput.setLang(lang);
   socket.send({ type: "set_language", lang });
   showError(lang === "ru" ? "Язык переключён на русский" : "Switched to English");
+  updateLangButton();
 }
 
 const voiceInput = createVoiceInput(
@@ -175,6 +182,7 @@ socket.onMessage((msg) => {
       currentLang = lang;
       setStoredLang(lang);
       voiceInput.setLang(lang);
+      updateLangButton();
     }
   } else if (type === "task_spawned") {
     console.log("[task]", "spawned:", msg.task_id, msg.prompt);
@@ -208,9 +216,17 @@ document.addEventListener("keydown", ensureAudioContext, { once: true });
 ensureAudioContext();
 
 // ---------------------------------------------------------------------------
-// Clap to wake — one clap wakes JARVIS and asks the user's Music app to play
-// the requested track. The music is not bundled with this project.
+// Wake song — plays in exactly two situations: (1) once when JARVIS starts
+// up (this page loads), which in normal use only happens right after the
+// Mac boots and launchd auto-opens this window, and (2) on a clap. It never
+// fires at any other time. Playback goes through Spotify, not Apple Music
+// (see /api/wake-music on the backend).
 // ---------------------------------------------------------------------------
+
+if (!sessionStorage.getItem("jarvis-startup-wake-fired")) {
+  sessionStorage.setItem("jarvis-startup-wake-fired", "1");
+  fetch("/api/wake-music", { method: "POST" }).catch(() => {});
+}
 
 startClapDetector(() => {
   ensureAudioContext();
@@ -234,6 +250,14 @@ const btnMenu = document.getElementById("btn-menu")!;
 const menuDropdown = document.getElementById("menu-dropdown")!;
 const btnRestart = document.getElementById("btn-restart")!;
 const btnFixSelf = document.getElementById("btn-fix-self")!;
+const btnLang = document.getElementById("btn-lang")!;
+
+updateLangButton();
+
+btnLang.addEventListener("click", (e) => {
+  e.stopPropagation();
+  switchLanguage(currentLang === "ru" ? "en" : "ru");
+});
 
 btnMute.addEventListener("click", (e) => {
   e.stopPropagation();
