@@ -9,9 +9,10 @@ import { createOrb, type OrbState } from "./orb";
 import { createVoiceInput, createAudioPlayer } from "./voice";
 import { createSocket } from "./ws";
 import { openSettings, checkFirstTimeSetup } from "./settings";
-import { initLanguage, setStoredLang, detectLanguageSwitch, type Lang } from "./language";
-import { startClapDetector } from "./clap";
+import { createSidebar } from "./sidebar";
 import "./style.css";
+
+const STORED_LANG = localStorage.getItem("jarvis-lang") || "en-US";
 
 // ---------------------------------------------------------------------------
 // State machine
@@ -53,26 +54,6 @@ const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
 const WS_URL = `${wsProto}//${window.location.host}/ws/voice`;
 const socket = createSocket(WS_URL);
 
-// ---------------------------------------------------------------------------
-// Language (English by default; user can pick on first visit)
-// ---------------------------------------------------------------------------
-
-let currentLang: Lang = initLanguage((lang) => {
-  currentLang = lang;
-  socket.send({ type: "set_language", lang });
-  voiceInput.setLang(lang);
-  updateLangButton();
-});
-
-function updateLangButton() {
-  const btn = document.getElementById("btn-lang");
-  if (btn) btn.textContent = currentLang === "ru" ? "🌐 Язык: RU" : "🌐 Language: EN";
-}
-
-socket.onOpen(() => {
-  socket.send({ type: "set_language", lang: currentLang });
-});
-
 const audioPlayer = createAudioPlayer();
 orb.setAnalyser(audioPlayer.getAnalyser());
 
@@ -102,35 +83,35 @@ function transition(newState: State) {
 // Voice input
 // ---------------------------------------------------------------------------
 
-function switchLanguage(lang: Lang) {
-  currentLang = lang;
-  setStoredLang(lang);
-  voiceInput.setLang(lang);
-  socket.send({ type: "set_language", lang });
-  showError(lang === "ru" ? "Язык переключён на русский" : "Switched to English");
-  updateLangButton();
-}
-
 const voiceInput = createVoiceInput(
   (text: string) => {
-    // Language can be switched at any moment, from any state — check first.
-    const requestedLang = detectLanguageSwitch(text);
-    if (requestedLang && requestedLang !== currentLang) {
-      switchLanguage(requestedLang);
-      return;
-    }
-
     // Cancel any current JARVIS response before sending new input
     audioPlayer.stop();
     // User spoke — send transcript
-    socket.send({ type: "transcript", text, isFinal: true, lang: currentLang });
+    socket.send({ type: "transcript", text, isFinal: true });
     transition("thinking");
   },
   (msg: string) => {
     showError(msg);
   },
-  currentLang
+  STORED_LANG
 );
+
+// ---------------------------------------------------------------------------
+// Sidebar — typed prompts + language switcher
+// ---------------------------------------------------------------------------
+
+createSidebar({
+  onSendText: (text: string) => {
+    // Same path as a spoken command — cancel current response, send transcript
+    audioPlayer.stop();
+    socket.send({ type: "transcript", text, isFinal: true });
+    transition("thinking");
+  },
+  onLanguageChange: (lang: string) => {
+    voiceInput.setLang(lang);
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Audio playback finished
@@ -176,14 +157,6 @@ socket.onMessage((msg) => {
   } else if (type === "text") {
     // Text fallback when TTS fails
     console.log("[JARVIS]", msg.text);
-  } else if (type === "lang_changed") {
-    const lang = msg.lang === "ru" ? "ru" : "en";
-    if (lang !== currentLang) {
-      currentLang = lang;
-      setStoredLang(lang);
-      voiceInput.setLang(lang);
-      updateLangButton();
-    }
   } else if (type === "task_spawned") {
     console.log("[task]", "spawned:", msg.task_id, msg.prompt);
   } else if (type === "task_complete") {
@@ -216,32 +189,6 @@ document.addEventListener("keydown", ensureAudioContext, { once: true });
 ensureAudioContext();
 
 // ---------------------------------------------------------------------------
-// Wake song — plays in exactly two situations: (1) once when JARVIS starts
-// up (this page loads), which in normal use only happens right after the
-// Mac boots and launchd auto-opens this window, and (2) on a clap. It never
-// fires at any other time. Playback goes through Spotify, not Apple Music
-// (see /api/wake-music on the backend).
-// ---------------------------------------------------------------------------
-
-if (!sessionStorage.getItem("jarvis-startup-wake-fired")) {
-  sessionStorage.setItem("jarvis-startup-wake-fired", "1");
-  fetch("/api/wake-music", { method: "POST" }).catch(() => {});
-}
-
-startClapDetector(() => {
-  ensureAudioContext();
-  fetch("/api/wake-music", { method: "POST" }).catch(() => {});
-
-  if (isMuted) {
-    isMuted = false;
-    btnMute.classList.remove("muted");
-  }
-  voiceInput.resume();
-  transition("listening");
-  statusEl.textContent = "listening...";
-});
-
-// ---------------------------------------------------------------------------
 // UI Controls
 // ---------------------------------------------------------------------------
 
@@ -250,14 +197,6 @@ const btnMenu = document.getElementById("btn-menu")!;
 const menuDropdown = document.getElementById("menu-dropdown")!;
 const btnRestart = document.getElementById("btn-restart")!;
 const btnFixSelf = document.getElementById("btn-fix-self")!;
-const btnLang = document.getElementById("btn-lang")!;
-
-updateLangButton();
-
-btnLang.addEventListener("click", (e) => {
-  e.stopPropagation();
-  switchLanguage(currentLang === "ru" ? "en" : "ru");
-});
 
 btnMute.addEventListener("click", (e) => {
   e.stopPropagation();
