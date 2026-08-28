@@ -2641,6 +2641,12 @@ async def api_fix_self():
     return JSONResponse({"status": "disabled", "reason": "Claude Code CLI feature removed"}, status_code=410)
 
 
+@app.post("/api/wake-music")
+async def api_wake_music():
+    """Play the user's licensed copy/Apple Music stream when JARVIS wakes."""
+    return await play_song("Should I Stay Or Should I Go The Clash")
+
+
 # ---------------------------------------------------------------------------
 # Static file serving (frontend)
 # ---------------------------------------------------------------------------

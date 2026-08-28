@@ -208,11 +208,13 @@ document.addEventListener("keydown", ensureAudioContext, { once: true });
 ensureAudioContext();
 
 // ---------------------------------------------------------------------------
-// Clap to wake — clap twice, JARVIS boots up and plays the wake sound
+// Clap to wake — one clap wakes JARVIS and asks the user's Music app to play
+// the requested track. The music is not bundled with this project.
 // ---------------------------------------------------------------------------
 
 startClapDetector(() => {
   ensureAudioContext();
+  fetch("/api/wake-music", { method: "POST" }).catch(() => {});
 
   if (isMuted) {
     isMuted = false;

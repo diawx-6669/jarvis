@@ -1,10 +1,6 @@
 /**
  * Clap detector — listens to the microphone continuously (independent of
- * speech recognition) and fires a callback when it hears two sharp claps
- * close together, MCU-style ("Jarvis?" *clap clap*).
- *
- * Requiring TWO claps in a short window avoids false triggers from doors
- * slamming, coughs, keyboard clacks, etc.
+ * speech recognition) and fires a callback when it hears one sharp clap.
  */
 
 export interface ClapDetectorOptions {
@@ -12,27 +8,23 @@ export interface ClapDetectorOptions {
   threshold?: number;
   /** Minimum silence (ms) between the peak and being able to detect the next one. */
   refractoryMs?: number;
-  /** Max gap (ms) between clap #1 and clap #2 to count as a pair. */
-  maxGapMs?: number;
 }
 
 export function startClapDetector(
   onClap: () => void,
   opts: ClapDetectorOptions = {}
 ): { stop(): void } {
-  const threshold = opts.threshold ?? 0.35;
-  const refractoryMs = opts.refractoryMs ?? 250;
-  const maxGapMs = opts.maxGapMs ?? 700;
+  const threshold = opts.threshold ?? 0.30;
+  const refractoryMs = opts.refractoryMs ?? 800;
 
   let stopped = false;
   let audioCtx: AudioContext | null = null;
   let stream: MediaStream | null = null;
   let lastClapTime = 0;
-  let pendingFirstClap = 0;
   let rafId = 0;
 
   navigator.mediaDevices
-    .getUserMedia({ audio: true })
+    .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
     .then((s) => {
       if (stopped) {
         s.getTracks().forEach((t) => t.stop());
@@ -62,17 +54,7 @@ export function startClapDetector(
         const now = performance.now();
         if (peak > threshold && now - lastClapTime > refractoryMs) {
           lastClapTime = now;
-          if (pendingFirstClap && now - pendingFirstClap <= maxGapMs) {
-            pendingFirstClap = 0;
-            onClap();
-          } else {
-            pendingFirstClap = now;
-          }
-        }
-
-        // Expire a stale first clap
-        if (pendingFirstClap && now - pendingFirstClap > maxGapMs) {
-          pendingFirstClap = 0;
+          onClap();
         }
 
         rafId = requestAnimationFrame(tick);

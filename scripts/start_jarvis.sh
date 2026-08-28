@@ -9,14 +9,18 @@ cd "$JARVIS_DIR"
 
 mkdir -p logs
 
-# Backend (FastAPI + WebSocket)
-nohup python3 server.py --port 8340 --host 0.0.0.0 >> logs/backend.log 2>&1 &
-echo $! > logs/backend.pid
+# Backend (FastAPI + WebSocket). Avoid a second copy when launchd retries.
+if ! lsof -nP -iTCP:8340 -sTCP:LISTEN >/dev/null 2>&1; then
+  nohup python3 server.py --port 8340 --host 0.0.0.0 >> logs/backend.log 2>&1 &
+  echo $! > logs/backend.pid
+fi
 
 # Frontend (Vite dev server)
-cd "$JARVIS_DIR/frontend"
-nohup npm run dev >> ../logs/frontend.log 2>&1 &
-echo $! > ../logs/frontend.pid
+if ! lsof -nP -iTCP:5173 -sTCP:LISTEN >/dev/null 2>&1; then
+  cd "$JARVIS_DIR/frontend"
+  nohup npm run dev >> ../logs/frontend.log 2>&1 &
+  echo $! > ../logs/frontend.pid
+fi
 
 # Give the dev server a moment to boot, then open Chrome
 sleep 5

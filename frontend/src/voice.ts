@@ -32,6 +32,7 @@ export function createVoiceInput(
   const recognition = new SR();
   recognition.continuous = true;
   recognition.interimResults = true;
+  recognition.maxAlternatives = 3;
   recognition.lang = lang === "ru" ? "ru-RU" : "en-US";
 
   let shouldListen = false;
