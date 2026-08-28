@@ -211,15 +211,8 @@ ensureAudioContext();
 // Clap to wake — clap twice, JARVIS boots up and plays the wake sound
 // ---------------------------------------------------------------------------
 
-const wakeSound = new Audio("/wake.mp3");
-wakeSound.volume = 0.9;
-
 startClapDetector(() => {
   ensureAudioContext();
-  wakeSound.currentTime = 0;
-  wakeSound.play().catch(() => {
-    // Autoplay can still be blocked before any user interaction; ignore.
-  });
 
   if (isMuted) {
     isMuted = false;
