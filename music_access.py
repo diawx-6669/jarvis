@@ -11,6 +11,8 @@ catalog (if the user has an active subscription) as a second attempt.
 import asyncio
 import logging
 
+from actions import applescript_escape
+
 log = logging.getLogger("jarvis.music")
 
 
@@ -22,10 +24,6 @@ async def _run_osascript(script: str) -> tuple[bool, str]:
     )
     stdout, stderr = await proc.communicate()
     return proc.returncode == 0, (stdout or stderr).decode().strip()
-
-
-def _escape(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
 async def play_song(query: str) -> dict:
@@ -43,7 +41,7 @@ async def play_song(query: str) -> dict:
             "confirmation": "Playing, sir." if ok else "Nothing queued to play, sir.",
         }
 
-    escaped = _escape(query)
+    escaped = applescript_escape(query)
     script = f'''
     tell application "Music"
         activate
@@ -74,7 +72,7 @@ async def _search_apple_music(query: str) -> dict:
     """Fallback: use Apple Music's own search UI via System Events, for
     tracks not present in the local library (requires an active subscription).
     """
-    escaped = _escape(query)
+    escaped = applescript_escape(query)
     script = f'''
     tell application "Music" to activate
     delay 0.3

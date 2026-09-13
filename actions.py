@@ -65,7 +65,7 @@ async def _mark_terminal_as_jarvis(revert_after: float = 5.0):
 
 async def _revert_terminal_theme(profile_name: str):
     """Revert a Terminal window back to its original profile."""
-    escaped = profile_name.replace('"', '\\"')
+    escaped = applescript_escape(profile_name)
     script = (
         'tell application "Terminal"\n'
         f'    set current settings of front window to settings set "{escaped}"\n'
@@ -122,7 +122,7 @@ async def open_terminal(command: str = "") -> dict:
 
 async def open_browser(url: str, browser: str = "chrome") -> dict:
     """Open URL in user's browser (Chrome or Firefox)."""
-    escaped_url = url.replace('"', '\\"')
+    escaped_url = applescript_escape(url)
 
     if browser.lower() == "firefox":
         app_name = "Firefox"
@@ -167,7 +167,7 @@ async def open_app(app_name: str) -> dict:
     if not app_name:
         return {"success": False, "confirmation": "I didn't catch which app to open, sir."}
 
-    escaped_name = app_name.replace('"', '\\"')
+    escaped_name = applescript_escape(app_name)
     script = f'tell application "{escaped_name}" to activate'
 
     proc = await asyncio.create_subprocess_exec(

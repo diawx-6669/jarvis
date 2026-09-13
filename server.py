@@ -1858,6 +1858,16 @@ def _short_sender(sender: str) -> str:
     return sender
 
 
+# Keyword lists used to detect/clean up spoken action requests.
+ACTION_KEYWORDS = {
+    "browse": [
+        "search for", "look up", "google", "find me", "pull up", "open chrome",
+        "open firefox", "open browser", "go to", "can you", "in the browser",
+        "can you go to", "please",
+    ],
+}
+
+
 async def handle_browse(text: str, target: str) -> str:
     """Open a URL directly or search. Smart about detecting URLs in speech."""
     import re
@@ -1895,9 +1905,7 @@ async def handle_browse(text: str, target: str) -> str:
 
     # 3. Fall back to Google search with cleaned query
     query = target
-    for prefix in ["search for", "look up", "google", "find me", "pull up", "open chrome",
-                    "open firefox", "open browser", "go to", "can you", "in the browser",
-                    "can you go to", "please"]:
+    for prefix in ACTION_KEYWORDS["browse"]:
         query = query.lower().replace(prefix, "").strip()
     # Remove filler words
     query = re.sub(r'\b(can|you|the|in|to|a|an|for|me|my|please)\b', '', query).strip()
@@ -1915,7 +1923,7 @@ async def handle_research(text: str, target: str, client: anthropic.AsyncAnthrop
     """Deep research with Opus — write results to HTML, open in browser."""
     try:
         research_response = await client.messages.create(
-            model="claude-opus-4-6",
+            model="claude-opus-5",
             max_tokens=2000,
             system=f"You are JARVIS, researching a topic for {USER_NAME}. Be thorough, organized, and cite sources where possible.",
             messages=[{"role": "user", "content": f"Research this thoroughly:\n\n{target}"}],

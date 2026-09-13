@@ -12,6 +12,8 @@ import asyncio
 import logging
 from datetime import datetime
 
+from actions import applescript_escape
+
 log = logging.getLogger("jarvis.mail")
 
 _mail_launched = False
@@ -225,7 +227,7 @@ end tell
 
 async def get_messages_from_account(account_name: str, count: int = 10) -> list[dict]:
     """Get recent messages from a specific account's inbox."""
-    escaped = account_name.replace('"', '\\"')
+    escaped = applescript_escape(account_name)
     script = f"""
 tell application "Mail"
     set acctMsgs to messages of mailbox "INBOX" of account "{escaped}"
@@ -267,7 +269,7 @@ async def search_mail(query: str, count: int = 10) -> list[dict]:
     Uses AppleScript filtering on subject. For broader search,
     we check both subject and sender.
     """
-    escaped = query.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = applescript_escape(query)
     script = f"""
 tell application "Mail"
     set output to ""
@@ -309,7 +311,7 @@ async def read_message(subject_match: str) -> dict | None:
 
     Returns {"sender", "subject", "date", "content"} or None.
     """
-    escaped = subject_match.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = applescript_escape(subject_match)
     script = f"""
 tell application "Mail"
     set allMsgs to messages of inbox
