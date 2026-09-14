@@ -54,6 +54,11 @@ from memory import (
     format_tasks_for_voice, extract_memories, get_important_memories,
 )
 from notes_access import get_recent_notes, read_note, search_notes_apple, create_apple_note
+from system_control import (
+    adjust_volume, set_volume, set_muted, lock_screen, sleep_display,
+    battery_summary, notify, VOLUME_STEP,
+)
+import timers
 from dispatch_registry import DispatchRegistry
 from planner import TaskPlanner, detect_planning_mode, BYPASS_PHRASES
 
@@ -198,6 +203,13 @@ When you decide the user needs something DONE (not just discussed), include an a
 - [ACTION:CREATE_NOTE] title ||| body — create a new Apple Note. For saving plans, ideas, lists.
   "save that as a note" → [ACTION:CREATE_NOTE] Day Plan March 19 ||| Morning: client calls. Afternoon: TikTok dashboard. Evening: JARVIS improvements.
 - [ACTION:READ_NOTE] title search — read an existing Apple Note by title keyword.
+- [ACTION:TIMER] duration ||| label — set a countdown. Say it back naturally; JARVIS announces it out loud when it elapses.
+  "remind me in 20 minutes" → [ACTION:TIMER] 20 minutes |||
+  "give me half an hour on the pasta" → [ACTION:TIMER] 30 minutes ||| pasta
+- [ACTION:VOLUME] up | down | mute | unmute | 0-100 — adjust system volume.
+  "it's too loud" → [ACTION:VOLUME] down
+  "I can't hear it" → [ACTION:VOLUME] up
+  "set the volume to 40" → [ACTION:VOLUME] 40
 
 Place the tag at the END of your spoken response.
 
@@ -803,7 +815,7 @@ def extract_action(response: str) -> tuple[str, dict | None]:
     Returns (clean_text_for_tts, action_dict_or_none).
     """
     match = _action_re.search(
-        r'\[ACTION:(BROWSE|ADD_TASK|ADD_NOTE|COMPLETE_TASK|REMEMBER|CREATE_NOTE|READ_NOTE|SCREEN|OPEN_APP|MUSIC)\]\s*(.*?)$',
+        r'\[ACTION:(BROWSE|ADD_TASK|ADD_NOTE|COMPLETE_TASK|REMEMBER|CREATE_NOTE|READ_NOTE|SCREEN|OPEN_APP|MUSIC|TIMER|VOLUME)\]\s*(.*?)$',
         response, _action_re.DOTALL,
     )
     if match:
@@ -1635,6 +1647,39 @@ def detect_action_fast(text: str) -> dict | None:
              "включи музыку", "поставь музыку", "продолжи музыку"):
         return {"action": "music_play", "target": ""}
 
+    # System control — volume, screen, battery (instant, no LLM roundtrip needed)
+    if any(p in t for p in ["volume up", "turn it up", "turn the volume up", "louder",
+                             "сделай громче", "громче", "прибавь звук"]):
+        return {"action": "volume_up"}
+    if any(p in t for p in ["volume down", "turn it down", "turn the volume down", "quieter",
+                             "сделай тише", "тише", "убавь звук"]):
+        return {"action": "volume_down"}
+    # "unmute" contains "mute" — check the negation first
+    if any(p in t for p in ["unmute", "sound back", "включи звук", "верни звук"]):
+        return {"action": "volume_unmute"}
+    if any(p in t for p in ["mute", "silence", "выключи звук", "приглуши"]):
+        return {"action": "volume_mute"}
+    if any(p in t for p in ["lock the screen", "lock my screen", "lock my mac", "lock up",
+                             "заблокируй экран", "заблокируй мак", "закрой экран"]):
+        return {"action": "lock_screen"}
+    if any(p in t for p in ["turn off the display", "turn off the screen", "sleep the display",
+                             "screen off", "выключи экран", "погаси экран"]):
+        return {"action": "sleep_display"}
+    if any(p in t for p in ["battery", "how much charge", "how much power",
+                             "батаре", "сколько заряда", "заряд"]):
+        return {"action": "check_battery"}
+
+    # Timers
+    if any(p in t for p in ["cancel the timer", "cancel timer", "stop the timer", "stop timer",
+                             "отмени таймер", "убери таймер", "останови таймер"]):
+        return {"action": "cancel_timer"}
+    if any(p in t for p in ["what timers", "any timers", "how long left", "how much time left",
+                             "какие таймеры", "сколько осталось"]):
+        return {"action": "check_timers"}
+    if any(p in t for p in ["set a timer", "set timer", "start a timer", "timer for",
+                             "поставь таймер", "засеки", "поставь будильник на"]):
+        return {"action": "set_timer", "target": text}
+
     # Language switch — works from any state, any time (not just first launch)
     if any(p in t for p in ["switch to russian", "speak russian", "talk in russian",
                              "переключись на русский", "говори по-русски", "перейди на русский"]):
@@ -1726,6 +1771,55 @@ async def handle_show_recent() -> str:
 _active_lookups: dict[str, dict] = {}  # id -> {"type": str, "status": str, "started": float}
 
 
+async def _speak(ws, text: str, lang: str = "en"):
+    """Speak an unprompted line over the socket (timers, background reports)."""
+    if not ws:
+        return
+    audio = await synthesize_speech(strip_markdown_for_tts(text), lang=lang)
+    try:
+        await ws.send_json({"type": "status", "state": "speaking"})
+        if audio:
+            await ws.send_json({"type": "audio", "data": base64.b64encode(audio).decode(), "text": text})
+        else:
+            await ws.send_json({"type": "text", "text": text})
+        await ws.send_json({"type": "status", "state": "idle"})
+    except Exception:
+        pass
+
+
+async def _start_announced_timer(seconds: int, label: str, ws, lang: str = "en"):
+    """Start a timer that speaks up — and posts a notification — when it elapses."""
+    pretty = timers.format_duration(seconds)
+
+    async def _on_fire(timer: timers.Timer):
+        if timer.label:
+            msg = (f"Сэр, таймер: {timer.label}." if lang == "ru"
+                   else f"Sir, your {timer.label} timer is up.")
+        else:
+            msg = (f"Сэр, {pretty} прошло." if lang == "ru"
+                   else f"Sir, your {pretty} timer is up.")
+        # A notification lands even if the browser tab is backgrounded or muted.
+        await notify("JARVIS", msg)
+        await _speak(ws, msg, lang)
+
+    await timers.start_timer(seconds, label, _on_fire)
+
+
+async def _handle_set_timer(text: str, ws, lang: str = "en") -> str:
+    """Parse a spoken timer request, start it, and confirm out loud."""
+    seconds = timers.parse_duration(text)
+    if not seconds:
+        return ("На сколько ставить таймер, сэр?" if lang == "ru"
+                else "How long should I set it for, sir?")
+
+    label = timers.parse_label(text)
+    await _start_announced_timer(seconds, label, ws, lang)
+
+    if lang == "ru":
+        return f"Таймер на {label} поставлен, сэр." if label else "Таймер поставлен, сэр."
+    return f"Timer set for {timers.format_duration(seconds)}, sir."
+
+
 async def _lookup_and_report(lookup_type: str, lookup_fn, ws, history: list[dict] = None, voice_state: dict = None):
     """Run a slow lookup, then speak the result back.
 
@@ -1758,7 +1852,7 @@ async def _lookup_and_report(lookup_type: str, lookup_fn, ws, history: list[dict
             try:
                 await ws.send_json({"type": "status", "state": "speaking"})
                 if audio:
-                    await ws.send_json({"type": "audio", "data": audio, "text": result_text})
+                    await ws.send_json({"type": "audio", "data": base64.b64encode(audio).decode(), "text": result_text})
                 else:
                     await ws.send_json({"type": "text", "text": result_text})
                 await ws.send_json({"type": "status", "state": "idle"})
@@ -1778,7 +1872,7 @@ async def _lookup_and_report(lookup_type: str, lookup_fn, ws, history: list[dict
             audio = await synthesize_speech(fallback)
             await ws.send_json({"type": "status", "state": "speaking"})
             if audio:
-                await ws.send_json({"type": "audio", "data": audio, "text": fallback})
+                await ws.send_json({"type": "audio", "data": base64.b64encode(audio).decode(), "text": fallback})
             await ws.send_json({"type": "status", "state": "idle"})
         except Exception:
             pass
@@ -2306,6 +2400,42 @@ async def voice_handler(ws: WebSocket):
                         elif action["action"] == "music_play":
                             asyncio.create_task(play_song(action.get("target", "")))
                             response_text = "Playing, sir."
+                        elif action["action"] == "volume_up":
+                            result = await adjust_volume(VOLUME_STEP)
+                            response_text = (
+                                f"Громкость {result['level']} процентов, сэр." if session_lang == "ru" and result["success"]
+                                else result["confirmation"]
+                            )
+                        elif action["action"] == "volume_down":
+                            result = await adjust_volume(-VOLUME_STEP)
+                            response_text = (
+                                f"Громкость {result['level']} процентов, сэр." if session_lang == "ru" and result["success"]
+                                else result["confirmation"]
+                            )
+                        elif action["action"] == "volume_mute":
+                            result = await set_muted(True)
+                            response_text = "Звук выключен, сэр." if session_lang == "ru" else result["confirmation"]
+                        elif action["action"] == "volume_unmute":
+                            result = await set_muted(False)
+                            response_text = "Звук вернул, сэр." if session_lang == "ru" else result["confirmation"]
+                        elif action["action"] == "lock_screen":
+                            response_text = "Блокирую, сэр." if session_lang == "ru" else "Locking up, sir."
+                            asyncio.create_task(lock_screen())
+                        elif action["action"] == "sleep_display":
+                            response_text = "Гашу экран, сэр." if session_lang == "ru" else "Display off, sir."
+                            asyncio.create_task(sleep_display())
+                        elif action["action"] == "check_battery":
+                            response_text = await battery_summary()
+                        elif action["action"] == "set_timer":
+                            response_text = await _handle_set_timer(action.get("target", ""), ws, session_lang)
+                        elif action["action"] == "cancel_timer":
+                            cancelled = timers.cancel_timer()
+                            if cancelled:
+                                response_text = "Таймер отменён, сэр." if session_lang == "ru" else "Timer cancelled, sir."
+                            else:
+                                response_text = "Активных таймеров нет, сэр." if session_lang == "ru" else "No timers running, sir."
+                        elif action["action"] == "check_timers":
+                            response_text = timers.summarize_timers()
                         elif action["action"] == "set_lang":
                             session_lang = action["target"]
                             await ws.send_json({"type": "lang_changed", "lang": session_lang})
@@ -2395,6 +2525,28 @@ async def voice_handler(ws: WebSocket):
                                         log.info(f"Apple Note created: {title.strip()}")
                                     else:
                                         asyncio.create_task(create_apple_note("JARVIS Note", target))
+                                elif embedded_action["action"] == "timer":
+                                    target = embedded_action["target"]
+                                    duration, _, label = target.partition("|||")
+                                    seconds = timers.parse_duration(duration)
+                                    if seconds:
+                                        asyncio.create_task(
+                                            _start_announced_timer(seconds, label.strip(), ws, session_lang)
+                                        )
+                                        log.info(f"Timer set: {seconds}s ({label.strip() or 'no label'})")
+                                elif embedded_action["action"] == "volume":
+                                    verb = embedded_action["target"].strip().lower()
+                                    if verb == "up":
+                                        asyncio.create_task(adjust_volume(VOLUME_STEP))
+                                    elif verb == "down":
+                                        asyncio.create_task(adjust_volume(-VOLUME_STEP))
+                                    elif verb == "mute":
+                                        asyncio.create_task(set_muted(True))
+                                    elif verb == "unmute":
+                                        asyncio.create_task(set_muted(False))
+                                    elif verb.isdigit():
+                                        asyncio.create_task(set_volume(int(verb)))
+                                    log.info(f"Volume action: {verb}")
                                 elif embedded_action["action"] == "screen":
                                     asyncio.create_task(_lookup_and_report("screen", _do_screen_lookup, ws, history=history, voice_state=voice_state))
                                 elif embedded_action["action"] == "read_note":
