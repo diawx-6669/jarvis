@@ -6,7 +6,7 @@ A voice-first AI assistant that runs on your Mac. Talk to it, and it talks back 
 
 JARVIS connects to your Apple Calendar, Mail, and Notes. It can browse the web, spawn Claude Code sessions to build entire projects, and plan your day -- all through natural voice conversation.
 
-> "Will do, sir."
+> "Will do, sir.
 
 <!-- TODO: Add demo GIF or screenshot here -->
 <!-- ![JARVIS Demo](docs/demo.gif) -->
