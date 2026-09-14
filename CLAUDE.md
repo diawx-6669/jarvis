@@ -53,3 +53,19 @@ When a user clones this repo and starts Claude Code, help them:
 - AppleScript for all macOS integrations (no OAuth needed)
 - Read-only for Mail (safety by design)
 - SQLite for all local data storage
+
+## Git
+Commits must be authored by the repo owner, otherwise GitHub does not count them
+toward his contribution graph. Sandboxed sessions often default `git config` to
+something else, so set the identity explicitly on every commit rather than relying
+on the config:
+
+```bash
+GIT_COMMITTER_NAME="diawx-6669я" GIT_COMMITTER_EMAIL="yerkin.ye@nisa.edu.kz" \
+  git commit --author="diawx-6669я <yerkin.ye@nisa.edu.kz>" -m "..."
+```
+
+Do not change `git config` to achieve this — pass the identity per commit.
+
+Keep the `Co-Authored-By:` trailer whenever Claude wrote the code: the owner is the
+author, Claude is a co-author, and that stays visible in the message.
