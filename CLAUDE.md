@@ -69,3 +69,13 @@ Do not change `git config` to achieve this — pass the identity per commit.
 
 Keep the `Co-Authored-By:` trailer whenever Claude wrote the code: the owner is the
 author, Claude is a co-author, and that stays visible in the message.
+
+### Commit granularity
+Commit each self-contained piece of work as soon as it works, instead of batching a
+whole session into one large commit. One bug fix, one module, one test file — one
+commit. Small commits are easier to review, revert and bisect, and they keep the
+history readable.
+
+Every commit must still contain real work. Do not pad the history with empty
+commits, no-op edits, or a single change sliced into meaningless pieces — that
+misrepresents the project's activity and helps nobody.
