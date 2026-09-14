@@ -153,6 +153,8 @@ Microphone -> Web Speech API -> WebSocket -> FastAPI -> Claude (Haiku) -> Fish A
 | `mail_access.py` | Apple Mail integration (read-only) |
 | `notes_access.py` | Apple Notes integration |
 | `actions.py` | System actions (Terminal, Chrome, Claude Code) |
+| `system_control.py` | Volume, screen lock, display sleep, battery |
+| `timers.py` | Spoken countdown timers |
 | `browser.py` | Playwright web automation |
 | `work_mode.py` | Persistent Claude Code sessions |
 | `planner.py` | Multi-step task planning with smart questions |
@@ -167,6 +169,8 @@ JARVIS uses action tags to trigger real system actions:
 - `[ACTION:PROMPT_PROJECT]` -- connects to an existing project via Claude Code
 - `[ACTION:ADD_TASK]` -- creates a tracked task with priority and due date
 - `[ACTION:REMEMBER]` -- stores a fact for future context
+- `[ACTION:TIMER]` -- sets a countdown JARVIS announces out loud
+- `[ACTION:VOLUME]` -- adjusts system volume
 
 ### Memory System
 JARVIS remembers things you tell it using SQLite with FTS5 full-text search. Preferences, decisions, and facts persist across sessions.
@@ -191,6 +195,18 @@ Say "switch to russian" / "switch to english" (or "переключись на �
 
 ### Music
 "play Bohemian Rhapsody", "play some music", "pause the music", "skip this song", "stop the music" — controls Apple Music (`Music.app`) via AppleScript. Needs the track in your library, or an active Apple Music subscription for the search fallback.
+
+### System control
+"turn the volume up", "mute", "set the volume to 40", "lock my screen", "turn off the display",
+"how much battery do I have" — and the Russian equivalents ("сделай тише", "заблокируй экран",
+"сколько заряда"). Volume and battery go through AppleScript and `pmset`; nothing here can shut
+the machine down or lose your work.
+
+### Timers
+"set a timer for 10 minutes", "give me half an hour on the pasta", "поставь таймер на 15 минут".
+JARVIS says it out loud when time is up and posts a macOS notification in case the tab is
+backgrounded. "Cancel the timer" and "how long left?" work too. Timers live in memory, so a
+server restart clears them.
 
 ### Build → preview → host → tweak
 1. "Build me a landing page" → Claude Code builds it, JARVIS auto-opens the local preview, and auto-commits the result to git.

@@ -34,6 +34,8 @@ When a user clones this repo and starts Claude Code, help them:
 - `mail_access.py` — Apple Mail integration (READ-ONLY)
 - `notes_access.py` — Apple Notes integration
 - `actions.py` — System actions (Terminal, Chrome, Claude Code)
+- `system_control.py` — Volume, screen lock, display sleep, battery
+- `timers.py` — Spoken countdown timers
 - `browser.py` — Playwright web automation
 - `work_mode.py` — Persistent Claude Code sessions
 
